@@ -12,6 +12,7 @@ import {
 } from "../components/DiffPanelShell";
 import { useComposerDraftStore } from "../composerDraftStore";
 import {
+  clearDiffSearchParams,
   type DiffRouteSearch,
   parseDiffRouteSearch,
   stripDiffSearchParams,
@@ -181,7 +182,9 @@ function ChatThreadRouteView() {
     void navigate({
       to: "/$threadId",
       params: { threadId },
-      search: { diff: undefined },
+      search: (previous) => {
+        return clearDiffSearchParams(previous);
+      },
     });
   }, [navigate, threadId]);
   const openDiff = useCallback(() => {
