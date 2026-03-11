@@ -80,6 +80,7 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { CodexThreadArchive } from "./codexSync/Services/CodexThreadArchive.ts";
 import { CodexThreadSync } from "./codexSync/Services/CodexThreadSync.ts";
 
 /**
@@ -212,6 +213,7 @@ export type ServerCoreRuntimeServices =
   | OrchestrationReactor
   | ProviderService
   | ProviderRegistry
+  | CodexThreadArchive
   | CodexThreadSync;
 
 export type ServerRuntimeServices =
@@ -265,6 +267,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const keybindingsManager = yield* Keybindings;
   const serverSettingsManager = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
+  const codexThreadArchive = yield* CodexThreadArchive;
   const codexThreadSync = yield* CodexThreadSync;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -707,6 +710,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
+  const codexThreadArchive = yield* CodexThreadArchive;
   const { openInEditor } = yield* Open;
 
   const subscriptionsScope = yield* Scope.make("sequential");
@@ -1032,6 +1036,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.serverSyncCodexThreads: {
         const body = stripRequestTag(request.body);
         return yield* codexThreadSync.syncThreads(body);
+      }
+
+      case WS_METHODS.serverArchiveCodexThread: {
+        const body = stripRequestTag(request.body);
+        return yield* codexThreadArchive.archiveThread(body);
       }
 
       default: {

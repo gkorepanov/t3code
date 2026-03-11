@@ -649,9 +649,155 @@ export default function Sidebar() {
     [],
   );
 
-  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{
-    threadId: ThreadId;
-  }>({
+  /**
+   * Delete a single thread: stop session, close terminal, dispatch delete,
+   * clean up drafts/state, and optionally remove orphaned worktree.
+   * Callers handle thread-level confirmation; this still prompts for worktree removal.
+   */
+  const deleteThread = useCallback(
+    async (
+      threadId: ThreadId,
+      opts: { deletedThreadIds?: ReadonlySet<ThreadId> } = {},
+    ): Promise<void> => {
+      const api = readNativeApi();
+      if (!api) return;
+      const thread = threads.find((t) => t.id === threadId);
+      if (!thread) return;
+      const threadProject = projects.find((project) => project.id === thread.projectId);
+      // When bulk-deleting, exclude the other threads being deleted so
+      // getOrphanedWorktreePathForThread correctly detects that no surviving
+      // threads will reference this worktree.
+      const deletedIds = opts.deletedThreadIds;
+      const survivingThreads =
+        deletedIds && deletedIds.size > 0
+          ? threads.filter((t) => t.id === threadId || !deletedIds.has(t.id))
+          : threads;
+      const orphanedWorktreePath = getOrphanedWorktreePathForThread(survivingThreads, threadId);
+      const displayWorktreePath = orphanedWorktreePath
+        ? formatWorktreePathForDisplay(orphanedWorktreePath)
+        : null;
+      const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== undefined;
+      const shouldDeleteWorktree =
+        canDeleteWorktree &&
+        (await api.dialogs.confirm(
+          [
+            "This thread is the only one linked to this worktree:",
+            displayWorktreePath ?? orphanedWorktreePath,
+            "",
+            "Delete the worktree too?",
+          ].join("\n"),
+        ));
+
+      let archivedCodexThreadId: string | null = null;
+      try {
+        const archiveResult = await api.server.archiveCodexThread({
+          threadId,
+          ...(appSettings.providers.codex.binaryPath.trim().length > 0
+            ? { codexBinaryPath: appSettings.providers.codex.binaryPath.trim() }
+            : {}),
+          ...(appSettings.providers.codex.homePath.trim().length > 0
+            ? { codexHomePath: appSettings.providers.codex.homePath.trim() }
+            : {}),
+        });
+        archivedCodexThreadId = archiveResult.codexThreadId;
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to archive Codex thread",
+          description:
+            error instanceof Error
+              ? error.message
+              : "The linked Codex thread could not be archived, so the T3 thread was not deleted.",
+        });
+        return;
+      }
+
+      if (archivedCodexThreadId === null && thread.session && thread.session.status !== "closed") {
+        await api.orchestration
+          .dispatchCommand({
+            type: "thread.session.stop",
+            commandId: newCommandId(),
+            threadId,
+            createdAt: new Date().toISOString(),
+          })
+          .catch(() => undefined);
+      }
+
+      try {
+        await api.terminal.close({ threadId, deleteHistory: true });
+      } catch {
+        // Terminal may already be closed
+      }
+
+      const allDeletedIds = deletedIds ?? new Set<ThreadId>();
+      const shouldNavigateToFallback = routeThreadId === threadId;
+      const fallbackThreadId = getFallbackThreadIdAfterDelete({
+        threads,
+        deletedThreadId: threadId,
+        deletedThreadIds: allDeletedIds,
+        sortOrder: appSettings.sidebarThreadSortOrder,
+      });
+      await api.orchestration.dispatchCommand({
+        type: "thread.delete",
+        commandId: newCommandId(),
+        threadId,
+      });
+      clearComposerDraftForThread(threadId);
+      clearProjectDraftThreadById(thread.projectId, thread.id);
+      clearTerminalState(threadId);
+      if (shouldNavigateToFallback) {
+        if (fallbackThreadId) {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: fallbackThreadId },
+            replace: true,
+          });
+        } else {
+          void navigate({ to: "/", replace: true });
+        }
+      }
+
+      if (!shouldDeleteWorktree || !orphanedWorktreePath || !threadProject) {
+        return;
+      }
+
+      try {
+        await removeWorktreeMutation.mutateAsync({
+          cwd: threadProject.cwd,
+          path: orphanedWorktreePath,
+          force: true,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error removing worktree.";
+        console.error("Failed to remove orphaned worktree after thread deletion", {
+          threadId,
+          projectCwd: threadProject.cwd,
+          worktreePath: orphanedWorktreePath,
+          error,
+        });
+        toastManager.add({
+          type: "error",
+          title: "Thread deleted, but worktree removal failed",
+          description: `Could not remove ${displayWorktreePath ?? orphanedWorktreePath}. ${message}`,
+        });
+      }
+    },
+    [
+      appSettings.sidebarThreadSortOrder,
+      clearComposerDraftForThread,
+      clearProjectDraftThreadById,
+      clearTerminalState,
+      navigate,
+      appSettings.providers.codex.binaryPath,
+      appSettings.providers.codex.homePath,
+      projects,
+      removeWorktreeMutation,
+      routeThreadId,
+      threads,
+    ],
+  );
+
+  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{ threadId: ThreadId }>({
     onCopy: (ctx) => {
       toastManager.add({
         type: "success",

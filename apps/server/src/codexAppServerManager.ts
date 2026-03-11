@@ -135,6 +135,14 @@ export interface CodexAppServerStartSessionInput {
   readonly runtimeMode: RuntimeMode;
 }
 
+export interface CodexAppServerArchiveThreadInput {
+  readonly threadId: ThreadId;
+  readonly providerThreadId: string;
+  readonly cwd: string;
+  readonly runtimeMode?: RuntimeMode;
+  readonly providerOptions?: ProviderSessionStartInput["providerOptions"];
+}
+
 export interface CodexThreadTurnSnapshot {
   id: TurnId;
   items: unknown[];
@@ -871,6 +879,36 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       includeTurns: true,
     });
     return this.parseThreadSnapshot("thread/read", response);
+  }
+
+  async archiveThread(input: CodexAppServerArchiveThreadInput): Promise<void> {
+    let startedSession = false;
+    let context: CodexSessionContext;
+
+    try {
+      try {
+        context = this.requireSession(input.threadId);
+      } catch {
+        await this.startSession({
+          threadId: input.threadId,
+          provider: "codex",
+          cwd: input.cwd,
+          runtimeMode: input.runtimeMode ?? "full-access",
+          resumeCursor: { threadId: input.providerThreadId },
+          ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
+        });
+        startedSession = true;
+        context = this.requireSession(input.threadId);
+      }
+
+      await this.sendRequest(context, "thread/archive", {
+        threadId: input.providerThreadId,
+      });
+    } finally {
+      if (startedSession) {
+        this.stopSession(input.threadId);
+      }
+    }
   }
 
   async rollbackThread(threadId: ThreadId, numTurns: number): Promise<CodexThreadSnapshot> {

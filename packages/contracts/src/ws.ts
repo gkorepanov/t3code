@@ -38,6 +38,7 @@ import { KeybindingRule } from "./keybindings";
 import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
 import {
+  ServerArchiveCodexThreadInput,
   ServerConfigUpdatedPayload,
   ServerProviderUpdatedPayload,
   ServerSyncCodexThreadsInput,
@@ -85,6 +86,7 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverSyncCodexThreads: "server.syncCodexThreads",
+  serverArchiveCodexThread: "server.archiveCodexThread",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -155,6 +157,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverGetSettings, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpdateSettings, Schema.Struct({ patch: ServerSettingsPatch })),
   tagRequestBody(WS_METHODS.serverSyncCodexThreads, ServerSyncCodexThreadsInput),
+  tagRequestBody(WS_METHODS.serverArchiveCodexThread, ServerArchiveCodexThreadInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

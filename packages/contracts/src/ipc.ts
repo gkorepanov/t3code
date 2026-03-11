@@ -27,6 +27,8 @@ import type {
 } from "./project";
 import type {
   ServerConfig,
+  ServerArchiveCodexThreadInput,
+  ServerArchiveCodexThreadResult,
   ServerProviderUpdatedPayload,
   ServerSyncCodexThreadsInput,
   ServerSyncCodexThreadsResult,
@@ -179,6 +181,9 @@ export interface NativeApi {
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     syncCodexThreads: (input: ServerSyncCodexThreadsInput) => Promise<ServerSyncCodexThreadsResult>;
+    archiveCodexThread: (
+      input: ServerArchiveCodexThreadInput,
+    ) => Promise<ServerArchiveCodexThreadResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

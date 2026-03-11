@@ -18,6 +18,7 @@ import {
   extractImportedThreadMessages,
   listCodexThreads,
   readResumeCursorThreadId,
+  readSyncedCodexThreadId,
   readSessionIndexTitles,
   resolveImportedThreadTitle,
 } from "../codexSync.ts";
@@ -63,19 +64,6 @@ function defaultCodexModelSelection(): ModelSelection {
     model: DEFAULT_MODEL_BY_PROVIDER.codex,
   };
 }
-
-function readSyncedCodexThreadId(threadId: ThreadId): string | undefined {
-  const prefix = "thread:codex-sync:";
-  if (!threadId.startsWith(prefix)) {
-    return undefined;
-  }
-  const lastSeparatorIndex = threadId.lastIndexOf(":");
-  if (lastSeparatorIndex <= prefix.length) {
-    return undefined;
-  }
-  return threadId.slice(prefix.length, lastSeparatorIndex);
-}
-
 function readySession(threadId: ThreadId, updatedAt: string): OrchestrationSession {
   return {
     threadId,

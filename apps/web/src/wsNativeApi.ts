@@ -215,6 +215,7 @@ export function createWsNativeApi(): NativeApi {
       getSettings: () => transport.request(WS_METHODS.serverGetSettings),
       updateSettings: (patch) => transport.request(WS_METHODS.serverUpdateSettings, { patch }),
       syncCodexThreads: (input) => transport.request(WS_METHODS.serverSyncCodexThreads, input),
+      archiveCodexThread: (input) => transport.request(WS_METHODS.serverArchiveCodexThread, input),
     },
     orchestration: {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
