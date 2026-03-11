@@ -17,6 +17,7 @@ import {
   extractImportedThreadMessages,
   listCodexThreads,
   readResumeCursorThreadId,
+  readSyncedCodexThreadId,
   readSessionIndexTitles,
   resolveImportedThreadTitle,
 } from "../codexSync.ts";
@@ -53,18 +54,6 @@ function makeThreadId(codexThreadId: string): ThreadId {
 function projectTitleFromCwd(cwd: string): string {
   const baseName = path.basename(cwd);
   return baseName.length > 0 ? baseName : cwd;
-}
-
-function readSyncedCodexThreadId(threadId: ThreadId): string | undefined {
-  const prefix = "thread:codex-sync:";
-  if (!threadId.startsWith(prefix)) {
-    return undefined;
-  }
-  const lastSeparatorIndex = threadId.lastIndexOf(":");
-  if (lastSeparatorIndex <= prefix.length) {
-    return undefined;
-  }
-  return threadId.slice(prefix.length, lastSeparatorIndex);
 }
 
 function readySession(threadId: ThreadId, updatedAt: string): OrchestrationSession {

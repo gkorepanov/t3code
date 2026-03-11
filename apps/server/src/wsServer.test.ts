@@ -57,6 +57,12 @@ import { GitCore } from "./git/Services/GitCore.ts";
 import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
+import { CodexThreadArchiveLive } from "./codexSync/Layers/CodexThreadArchive.ts";
+import { CodexThreadSyncLive } from "./codexSync/Layers/CodexThreadSync.ts";
+import {
+  CodexThreadArchive,
+  type CodexThreadArchiveShape,
+} from "./codexSync/Services/CodexThreadArchive.ts";
 import {
   CodexThreadSync,
   type CodexThreadSyncShape,
@@ -486,6 +492,7 @@ describe("WebSocket Server", () => {
       staticDir?: string;
       providerLayer?: Layer.Layer<ProviderService, never>;
       providerHealth?: ProviderHealthShape;
+      codexThreadArchive?: CodexThreadArchiveShape;
       codexThreadSync?: CodexThreadSyncShape;
       open?: OpenShape;
       gitManager?: GitManagerShape;
@@ -551,6 +558,13 @@ describe("WebSocket Server", () => {
           runtimeOverrides,
         )
       : defaultBaseRuntimeLayer;
+    const defaultSyncLayer = makeServerSyncLayer().pipe(Layer.provide(defaultBaseRuntimeLayer));
+    const defaultCodexThreadSyncLayer = CodexThreadSyncLive.pipe(
+      Layer.provide(defaultBaseRuntimeLayer),
+    );
+    const defaultCodexThreadArchiveLayer = CodexThreadArchiveLive.pipe(
+      Layer.provide(defaultBaseRuntimeLayer),
+    );
     const codexThreadSyncLayer = options.codexThreadSync
       ? Layer.succeed(CodexThreadSync, options.codexThreadSync)
       : options.providerLayer
@@ -558,8 +572,20 @@ describe("WebSocket Server", () => {
             syncThreads: () =>
               Effect.fail(new Error("Codex thread sync is not available in this test setup.")),
           })
-        : makeServerSyncLayer().pipe(Layer.provide(defaultBaseRuntimeLayer));
-    const runtimeLayer = Layer.merge(baseRuntimeLayer, codexThreadSyncLayer);
+        : defaultCodexThreadSyncLayer;
+    const codexThreadArchiveLayer = options.codexThreadArchive
+      ? Layer.succeed(CodexThreadArchive, options.codexThreadArchive)
+      : options.providerLayer
+        ? Layer.succeed(CodexThreadArchive, {
+            archiveThread: () =>
+              Effect.fail(new Error("Codex thread archive is not available in this test setup.")),
+          })
+        : defaultCodexThreadArchiveLayer;
+    const syncRuntimeLayer =
+      !options.providerLayer && !options.codexThreadSync && !options.codexThreadArchive
+        ? defaultSyncLayer
+        : Layer.mergeAll(codexThreadSyncLayer, codexThreadArchiveLayer);
+    const runtimeLayer = Layer.merge(baseRuntimeLayer, syncRuntimeLayer);
     const dependenciesLayer = Layer.empty.pipe(
       Layer.provideMerge(runtimeLayer),
       Layer.provideMerge(providerHealthLayer),
@@ -1278,6 +1304,41 @@ describe("WebSocket Server", () => {
       skippedArchived: 1,
       createdProjects: 1,
       failed: [],
+    });
+  });
+
+  it("responds to server.archiveCodexThread", async () => {
+    const archiveThread = vi.fn(() =>
+      Effect.succeed({
+        codexThreadId: "codex-thread-1",
+      }),
+    );
+    server = await createTestServer({
+      cwd: "/test",
+      codexThreadArchive: {
+        archiveThread,
+      },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.serverArchiveCodexThread, {
+      threadId: "thread:codex-sync:codex-thread-1:local",
+      codexHomePath: "/tmp/.codex",
+      codexBinaryPath: "/usr/local/bin/codex",
+    });
+
+    expect(archiveThread).toHaveBeenCalledWith({
+      threadId: "thread:codex-sync:codex-thread-1:local",
+      codexHomePath: "/tmp/.codex",
+      codexBinaryPath: "/usr/local/bin/codex",
+    });
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      codexThreadId: "codex-thread-1",
     });
   });
 
