@@ -1,10 +1,11 @@
 import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, type CSSProperties } from "react";
 
 import ThreadSidebar from "../components/Sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { resolveShortcutCommand } from "../keybindings";
@@ -95,6 +96,7 @@ function ChatRouteGlobalShortcuts() {
 
 function ChatRouteLayout() {
   const navigate = useNavigate();
+  const shouldLockViewport = useMediaQuery("(pointer: coarse)");
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -112,8 +114,54 @@ function ChatRouteLayout() {
     };
   }, [navigate]);
 
+  useEffect(() => {
+    if (!shouldLockViewport) {
+      document.documentElement.style.removeProperty("--mobile-app-height");
+      return;
+    }
+
+    const clampWindowScroll = () => {
+      if (window.scrollX !== 0 || window.scrollY !== 0) {
+        window.scrollTo(0, 0);
+      }
+    };
+    const syncViewportHeight = () => {
+      const height = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      document.documentElement.style.setProperty("--mobile-app-height", `${height}px`);
+      clampWindowScroll();
+    };
+
+    syncViewportHeight();
+    window.addEventListener("scroll", clampWindowScroll, { passive: true });
+    window.addEventListener("resize", syncViewportHeight);
+    window.visualViewport?.addEventListener("resize", syncViewportHeight);
+    window.visualViewport?.addEventListener("scroll", syncViewportHeight);
+
+    return () => {
+      window.removeEventListener("scroll", clampWindowScroll);
+      window.removeEventListener("resize", syncViewportHeight);
+      window.visualViewport?.removeEventListener("resize", syncViewportHeight);
+      window.visualViewport?.removeEventListener("scroll", syncViewportHeight);
+      document.documentElement.style.removeProperty("--mobile-app-height");
+    };
+  }, [shouldLockViewport]);
+
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider
+      defaultOpen
+      className="h-dvh min-h-0 overflow-hidden overscroll-none"
+      style={
+        shouldLockViewport
+          ? ({
+              inset: "0",
+              height: "var(--mobile-app-height)",
+              overflow: "hidden",
+              position: "fixed",
+              width: "100%",
+            } as CSSProperties)
+          : undefined
+      }
+    >
       <ChatRouteGlobalShortcuts />
       <Sidebar
         side="left"
