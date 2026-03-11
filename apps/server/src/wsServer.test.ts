@@ -9,7 +9,11 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import { createServer } from "./wsServer";
 import WebSocket from "ws";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config";
-import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
+import {
+  makeServerProviderLayer,
+  makeServerRuntimeServicesLayer,
+  makeServerSyncLayer,
+} from "./serverLayers";
 
 import {
   DEFAULT_TERMINAL_ID,
@@ -56,6 +60,10 @@ import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import {
+  CodexThreadSync,
+  type CodexThreadSyncShape,
+} from "./codexSync/Services/CodexThreadSync.ts";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -498,6 +506,7 @@ describe("WebSocket Server", () => {
       staticDir?: string;
       providerLayer?: Layer.Layer<ProviderService, never>;
       providerRegistry?: ProviderRegistryShape;
+      codexThreadSync?: CodexThreadSyncShape;
       open?: OpenShape;
       gitManager?: GitManagerShape;
       gitCore?: Pick<GitCoreShape, "listBranches" | "initRepo" | "pullCurrentBranch">;
@@ -515,6 +524,7 @@ describe("WebSocket Server", () => {
     const scope = await Effect.runPromise(Scope.make("sequential"));
     const persistenceLayer = options.persistenceLayer ?? SqlitePersistenceMemory;
     const providerLayer = options.providerLayer ?? makeServerProviderLayer();
+    const infrastructureLayer = providerLayer.pipe(Layer.provideMerge(persistenceLayer));
     const providerRegistryLayer = Layer.succeed(
       ProviderRegistry,
       options.providerRegistry ?? defaultProviderRegistryService,
@@ -534,7 +544,6 @@ describe("WebSocket Server", () => {
       autoBootstrapProjectFromCwd: options.autoBootstrapProjectFromCwd ?? false,
       logWebSocketEvents: options.logWebSocketEvents ?? Boolean(options.devUrl),
     } satisfies ServerConfigShape);
-    const infrastructureLayer = providerLayer.pipe(Layer.provideMerge(persistenceLayer));
     const runtimeOverrides = Layer.mergeAll(
       options.gitManager ? Layer.succeed(GitManager, options.gitManager) : Layer.empty,
       options.gitCore
@@ -545,13 +554,22 @@ describe("WebSocket Server", () => {
         : Layer.empty,
     );
 
-    const runtimeLayer = Layer.merge(
+    const baseRuntimeLayer = Layer.merge(
       Layer.merge(
         makeServerRuntimeServicesLayer().pipe(Layer.provide(infrastructureLayer)),
         infrastructureLayer,
       ),
       runtimeOverrides,
     );
+    const codexThreadSyncLayer = options.codexThreadSync
+      ? Layer.succeed(CodexThreadSync, options.codexThreadSync)
+      : options.providerLayer
+        ? Layer.succeed(CodexThreadSync, {
+            syncThreads: () =>
+              Effect.fail(new Error("Codex thread sync is not available in this test setup.")),
+          })
+        : makeServerSyncLayer().pipe(Layer.provide(baseRuntimeLayer));
+    const runtimeLayer = Layer.merge(baseRuntimeLayer, codexThreadSyncLayer);
     const dependenciesLayer = Layer.empty.pipe(
       Layer.provideMerge(runtimeLayer),
       Layer.provideMerge(providerRegistryLayer),
@@ -1253,6 +1271,49 @@ describe("WebSocket Server", () => {
     expectAvailableEditors(
       (configResponse.result as { availableEditors: unknown }).availableEditors,
     );
+  });
+
+  it("responds to server.syncCodexThreads", async () => {
+    const syncThreads = vi.fn(() =>
+      Effect.succeed({
+        scanned: 3,
+        imported: 1,
+        skippedExisting: 1,
+        skippedArchived: 1,
+        createdProjects: 1,
+        failed: [],
+      }),
+    );
+    server = await createTestServer({
+      cwd: "/test",
+      codexThreadSync: {
+        syncThreads,
+      },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.serverSyncCodexThreads, {
+      codexHomePath: "/tmp/.codex",
+      codexBinaryPath: "/usr/local/bin/codex",
+    });
+
+    expect(syncThreads).toHaveBeenCalledWith({
+      codexHomePath: "/tmp/.codex",
+      codexBinaryPath: "/usr/local/bin/codex",
+    });
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      scanned: 3,
+      imported: 1,
+      skippedExisting: 1,
+      skippedArchived: 1,
+      createdProjects: 1,
+      failed: [],
+    });
   });
 
   it("returns error for unknown methods", async () => {

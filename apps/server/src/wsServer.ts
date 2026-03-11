@@ -80,6 +80,7 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { CodexThreadSync } from "./codexSync/Services/CodexThreadSync.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -210,7 +211,8 @@ export type ServerCoreRuntimeServices =
   | CheckpointDiffQuery
   | OrchestrationReactor
   | ProviderService
-  | ProviderRegistry;
+  | ProviderRegistry
+  | CodexThreadSync;
 
 export type ServerRuntimeServices =
   | ServerCoreRuntimeServices
@@ -263,6 +265,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const keybindingsManager = yield* Keybindings;
   const serverSettingsManager = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
+  const codexThreadSync = yield* CodexThreadSync;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -1024,6 +1027,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.serverUpdateSettings: {
         const body = stripRequestTag(request.body);
         return yield* serverSettingsManager.updateSettings(body.patch);
+      }
+
+      case WS_METHODS.serverSyncCodexThreads: {
+        const body = stripRequestTag(request.body);
+        return yield* codexThreadSync.syncThreads(body);
       }
 
       default: {

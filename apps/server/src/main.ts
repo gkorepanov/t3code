@@ -20,7 +20,11 @@ import {
 import { fixPath, resolveBaseDir } from "./os-jank";
 import { Open } from "./open";
 import * as SqlitePersistence from "./persistence/Layers/Sqlite";
-import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
+import {
+  makeServerProviderLayer,
+  makeServerRuntimeServicesLayer,
+  makeServerSyncLayer,
+} from "./serverLayers";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { Server } from "./wsServer";
@@ -293,10 +297,10 @@ const ServerConfigLive = (input: CliInput) =>
 const LayerLive = (input: CliInput) =>
   Layer.empty.pipe(
     Layer.provideMerge(makeServerRuntimeServicesLayer()),
+    Layer.provideMerge(makeServerSyncLayer()),
     Layer.provideMerge(makeServerProviderLayer()),
     Layer.provideMerge(ProviderRegistryLive),
     Layer.provideMerge(SqlitePersistence.layerConfig),
-    Layer.provideMerge(ServerLoggerLive),
     Layer.provideMerge(AnalyticsServiceLayerLive),
     Layer.provideMerge(ServerSettingsLive),
     Layer.provideMerge(ServerConfigLive(input)),

@@ -213,6 +213,27 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
   );
 }
 
+function formatCodexSyncSummary(input: {
+  readonly imported: number;
+  readonly skippedExisting: number;
+  readonly skippedArchived: number;
+  readonly createdProjects: number;
+  readonly failedCount: number;
+}) {
+  const parts = [
+    `Imported ${input.imported} thread${input.imported === 1 ? "" : "s"}`,
+    `skipped ${input.skippedExisting} existing`,
+    `skipped ${input.skippedArchived} archived`,
+  ];
+  if (input.createdProjects > 0) {
+    parts.push(`created ${input.createdProjects} project${input.createdProjects === 1 ? "" : "s"}`);
+  }
+  if (input.failedCount > 0) {
+    parts.push(`failed ${input.failedCount}`);
+  }
+  return `${parts.join(", ")}.`;
+}
+
 function SettingsSection({
   title,
   icon,
@@ -515,6 +536,7 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
@@ -540,6 +562,9 @@ export function GeneralSettingsPanel() {
     Partial<Record<ProviderKind, string | null>>
   >({});
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
+  const [isSyncingCodexThreads, setIsSyncingCodexThreads] = useState(false);
+  const [codexSyncSummary, setCodexSyncSummary] = useState<string | null>(null);
+  const [codexSyncError, setCodexSyncError] = useState<string | null>(null);
   const refreshingRef = useRef(false);
   const queryClient = useQueryClient();
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
@@ -558,6 +583,50 @@ export function GeneralSettingsPanel() {
         setIsRefreshingProviders(false);
       });
   }, [queryClient]);
+  const syncCodexThreads = useCallback(() => {
+    setCodexSyncSummary(null);
+    setCodexSyncError(null);
+    setIsSyncingCodexThreads(true);
+    const api = ensureNativeApi();
+    const codexBinaryPath = settings.providers.codex.binaryPath.trim();
+    const codexHomePath = settings.providers.codex.homePath.trim();
+    void api.server
+      .syncCodexThreads({
+        ...(codexBinaryPath.length > 0 ? { codexBinaryPath } : {}),
+        ...(codexHomePath.length > 0 ? { codexHomePath } : {}),
+      })
+      .then(async (result) => {
+        const snapshot = await api.orchestration.getSnapshot();
+        syncServerReadModel(snapshot);
+        setCodexSyncSummary(
+          formatCodexSyncSummary({
+            imported: result.imported,
+            skippedExisting: result.skippedExisting,
+            skippedArchived: result.skippedArchived,
+            createdProjects: result.createdProjects,
+            failedCount: result.failed.length,
+          }),
+        );
+        setCodexSyncError(
+          result.failed.length > 0
+            ? result.failed
+                .slice(0, 3)
+                .map((entry) => `${entry.codexThreadId}: ${entry.message}`)
+                .join("\n")
+            : null,
+        );
+      })
+      .catch((error) => {
+        setCodexSyncError(error instanceof Error ? error.message : "Unable to sync Codex threads.");
+      })
+      .finally(() => {
+        setIsSyncingCodexThreads(false);
+      });
+  }, [
+    settings.providers.codex.binaryPath,
+    settings.providers.codex.homePath,
+    syncServerReadModel,
+  ]);
 
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
@@ -1229,6 +1298,44 @@ export function GeneralSettingsPanel() {
                             </span>
                           ) : null}
                         </label>
+                      </div>
+                    ) : null}
+
+                    {providerCard.provider === "codex" ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <div className="rounded-xl border border-border bg-background/50 p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-foreground">
+                                Sync Codex threads
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Import every non-archived Codex thread that is not already present
+                                in T3.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="outline"
+                              disabled={isSyncingCodexThreads}
+                              onClick={syncCodexThreads}
+                            >
+                              {isSyncingCodexThreads ? "Syncing..." : "Sync missing threads"}
+                            </Button>
+                          </div>
+
+                          {codexSyncSummary ? (
+                            <p className="mt-3 text-xs text-muted-foreground">
+                              {codexSyncSummary}
+                            </p>
+                          ) : null}
+                          {codexSyncError ? (
+                            <p className="mt-2 whitespace-pre-wrap text-xs text-destructive">
+                              {codexSyncError}
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
                     ) : null}
 

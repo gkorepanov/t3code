@@ -28,6 +28,9 @@ import type {
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
+  ServerSyncCodexThreadsInput,
+  ServerSyncCodexThreadsResult,
+  ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server";
 import type {
@@ -40,7 +43,6 @@ import type {
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal";
-import type { ServerUpsertKeybindingInput } from "./server";
 import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
@@ -176,6 +178,7 @@ export interface NativeApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    syncCodexThreads: (input: ServerSyncCodexThreadsInput) => Promise<ServerSyncCodexThreadsResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

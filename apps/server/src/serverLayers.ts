@@ -8,6 +8,7 @@ import { ServerConfig } from "./config";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
+import { ProviderSessionRuntimeRepository } from "./persistence/Services/ProviderSessionRuntime.ts";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
@@ -23,6 +24,7 @@ import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRe
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderService } from "./provider/Services/ProviderService";
+import { CodexAdapter } from "./provider/Services/CodexAdapter.ts";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
 import { ServerSettingsService } from "./serverSettings";
 
@@ -34,6 +36,7 @@ import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { PtyAdapter } from "./terminal/Services/PTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { CodexThreadSyncLive } from "./codexSync/Layers/CodexThreadSync.ts";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -53,7 +56,7 @@ const makeRuntimePtyAdapterLayer = () =>
   }).pipe(Layer.unwrap);
 
 export function makeServerProviderLayer(): Layer.Layer<
-  ProviderService,
+  ProviderService | CodexAdapter | ProviderSessionRuntimeRepository,
   ProviderUnsupportedError,
   | SqlClient.SqlClient
   | ServerConfig
@@ -83,10 +86,19 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(claudeAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
-    return makeProviderServiceLive(
+    const providerServiceLayer = makeProviderServiceLive(
       canonicalEventLogger ? { canonicalEventLogger } : undefined,
     ).pipe(Layer.provide(adapterRegistryLayer), Layer.provide(providerSessionDirectoryLayer));
+    return Layer.mergeAll(
+      ProviderSessionRuntimeRepositoryLive,
+      codexAdapterLayer,
+      providerServiceLayer,
+    );
   }).pipe(Layer.unwrap);
+}
+
+export function makeServerSyncLayer() {
+  return CodexThreadSyncLive;
 }
 
 export function makeServerRuntimeServicesLayer() {
