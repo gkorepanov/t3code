@@ -52,7 +52,11 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
 import { isElectron } from "../env";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  clearDiffSearchParams,
+  parseDiffRouteSearch,
+  stripDiffSearchParams,
+} from "../diffRouteSearch";
 import {
   type ComposerSlashCommand,
   type ComposerTrigger,
@@ -1401,7 +1405,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       params: { threadId },
       replace: true,
       search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
+        const rest = clearDiffSearchParams(previous);
         return diffOpen ? rest : { ...rest, diff: "1" };
       },
     });

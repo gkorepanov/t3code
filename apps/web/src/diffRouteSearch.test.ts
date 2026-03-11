@@ -1,6 +1,7 @@
+import { retainSearchParams } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
 
-import { parseDiffRouteSearch } from "./diffRouteSearch";
+import { clearDiffSearchParams, parseDiffRouteSearch } from "./diffRouteSearch";
 
 describe("parseDiffRouteSearch", () => {
   it("parses valid diff search values", () => {
@@ -69,6 +70,20 @@ describe("parseDiffRouteSearch", () => {
 
     expect(parsed).toEqual({
       diff: "1",
+    });
+  });
+
+  it("can explicitly clear diff state through retainSearchParams middleware", () => {
+    const retainDiff = retainSearchParams<{ diff?: string }>(["diff"]);
+    const result = retainDiff({
+      search: { diff: "1" },
+      next: () => clearDiffSearchParams({ diff: "1", diffTurnId: "turn-1" }),
+    });
+
+    expect(result).toEqual({
+      diff: undefined,
+      diffTurnId: undefined,
+      diffFilePath: undefined,
     });
   });
 });
