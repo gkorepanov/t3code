@@ -10,6 +10,7 @@ import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
 import { preferredTerminalEditor } from "../terminal-links";
+import { useStore } from "../store";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
@@ -80,12 +81,37 @@ function patchCustomModels(provider: ProviderKind, models: string[]) {
   }
 }
 
+function formatCodexSyncSummary(input: {
+  readonly imported: number;
+  readonly skippedExisting: number;
+  readonly skippedArchived: number;
+  readonly createdProjects: number;
+  readonly failedCount: number;
+}) {
+  const parts = [
+    `Imported ${input.imported} thread${input.imported === 1 ? "" : "s"}`,
+    `skipped ${input.skippedExisting} existing`,
+    `skipped ${input.skippedArchived} archived`,
+  ];
+  if (input.createdProjects > 0) {
+    parts.push(`created ${input.createdProjects} project${input.createdProjects === 1 ? "" : "s"}`);
+  }
+  if (input.failedCount > 0) {
+    parts.push(`failed ${input.failedCount}`);
+  }
+  return `${parts.join(", ")}.`;
+}
+
 function SettingsRouteView() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { settings, defaults, updateSettings } = useAppSettings();
+  const syncServerReadModel = useStore((state) => state.syncServerReadModel);
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [isSyncingCodexThreads, setIsSyncingCodexThreads] = useState(false);
+  const [codexSyncSummary, setCodexSyncSummary] = useState<string | null>(null);
+  const [codexSyncError, setCodexSyncError] = useState<string | null>(null);
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
@@ -115,6 +141,45 @@ function SettingsRouteView() {
         setIsOpeningKeybindings(false);
       });
   }, [keybindingsConfigPath]);
+
+  const syncCodexThreads = useCallback(() => {
+    setCodexSyncSummary(null);
+    setCodexSyncError(null);
+    setIsSyncingCodexThreads(true);
+    const api = ensureNativeApi();
+    void api.server
+      .syncCodexThreads({
+        ...(codexBinaryPath.trim().length > 0 ? { codexBinaryPath: codexBinaryPath.trim() } : {}),
+        ...(codexHomePath.trim().length > 0 ? { codexHomePath: codexHomePath.trim() } : {}),
+      })
+      .then(async (result) => {
+        const snapshot = await api.orchestration.getSnapshot();
+        syncServerReadModel(snapshot);
+        setCodexSyncSummary(
+          formatCodexSyncSummary({
+            imported: result.imported,
+            skippedExisting: result.skippedExisting,
+            skippedArchived: result.skippedArchived,
+            createdProjects: result.createdProjects,
+            failedCount: result.failed.length,
+          }),
+        );
+        if (result.failed.length > 0) {
+          setCodexSyncError(
+            result.failed
+              .slice(0, 3)
+              .map((entry) => `${entry.codexThreadId}: ${entry.message}`)
+              .join("\n"),
+          );
+        }
+      })
+      .catch((error) => {
+        setCodexSyncError(error instanceof Error ? error.message : "Unable to sync Codex threads.");
+      })
+      .finally(() => {
+        setIsSyncingCodexThreads(false);
+      });
+  }, [codexBinaryPath, codexHomePath, syncServerReadModel]);
 
   const addCustomModel = useCallback(
     (provider: ProviderKind) => {
@@ -300,6 +365,33 @@ function SettingsRouteView() {
                   >
                     Reset codex overrides
                   </Button>
+                </div>
+
+                <div className="rounded-xl border border-border bg-background/50 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">Sync Codex threads</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Import every non-archived Codex thread that is not already present in T3.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      disabled={isSyncingCodexThreads}
+                      onClick={syncCodexThreads}
+                    >
+                      {isSyncingCodexThreads ? "Syncing..." : "Sync missing threads"}
+                    </Button>
+                  </div>
+
+                  {codexSyncSummary ? (
+                    <p className="mt-3 text-xs text-muted-foreground">{codexSyncSummary}</p>
+                  ) : null}
+                  {codexSyncError ? (
+                    <p className="mt-2 whitespace-pre-wrap text-xs text-destructive">
+                      {codexSyncError}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </section>

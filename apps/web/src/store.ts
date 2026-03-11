@@ -117,6 +117,35 @@ function updateThread(
   return changed ? next : threads;
 }
 
+function isSyncedCodexThread(threadId: ThreadId): boolean {
+  return threadId.startsWith("thread:codex-sync:");
+}
+
+function normalizeSyncedCodexUserText(text: string): string {
+  let normalized = text.trimStart();
+  while (normalized.startsWith("<environment_context>")) {
+    const endIndex = normalized.indexOf("</environment_context>");
+    if (endIndex < 0) {
+      return "";
+    }
+    normalized = normalized.slice(endIndex + "</environment_context>".length).trimStart();
+  }
+
+  if (normalized.startsWith("# Files mentioned by the user:")) {
+    const marker = "\n## My request for Codex:";
+    const markerIndex = normalized.indexOf(marker);
+    if (markerIndex >= 0) {
+      normalized = normalized.slice(markerIndex + marker.length).trimStart();
+    }
+  }
+
+  if (normalized.startsWith("## My request for Codex:")) {
+    normalized = normalized.slice("## My request for Codex:".length).trimStart();
+  }
+
+  return normalized.trim();
+}
+
 function mapProjectsFromReadModel(
   incoming: OrchestrationReadModel["projects"],
   previous: Project[],
@@ -255,11 +284,15 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     .filter((thread) => thread.deletedAt === null)
     .map((thread) => {
       const existing = existingThreadById.get(thread.id);
+      const syncedCodexThread = isSyncedCodexThread(thread.id);
+      const title = syncedCodexThread
+        ? normalizeSyncedCodexUserText(thread.title) || thread.title
+        : thread.title;
       return {
         id: thread.id,
         codexThreadId: null,
         projectId: thread.projectId,
-        title: thread.title,
+        title,
         model: resolveModelSlugForProvider(
           inferProviderForThreadModel({
             model: thread.model,
@@ -289,10 +322,14 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
             sizeBytes: attachment.sizeBytes,
             previewUrl: toAttachmentPreviewUrl(attachmentPreviewRoutePath(attachment.id)),
           }));
+          const text =
+            syncedCodexThread && message.role === "user"
+              ? normalizeSyncedCodexUserText(message.text) || message.text
+              : message.text;
           const normalizedMessage: ChatMessage = {
             id: message.id,
             role: message.role,
-            text: message.text,
+            text,
             createdAt: message.createdAt,
             streaming: message.streaming,
             ...(message.streaming ? {} : { completedAt: message.updatedAt }),

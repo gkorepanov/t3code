@@ -69,3 +69,25 @@ export const ServerConfigUpdatedPayload = Schema.Struct({
   providers: ServerProviderStatuses,
 });
 export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type;
+
+export const ServerSyncCodexThreadsInput = Schema.Struct({
+  codexBinaryPath: Schema.optional(TrimmedNonEmptyString),
+  codexHomePath: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerSyncCodexThreadsInput = typeof ServerSyncCodexThreadsInput.Type;
+
+export const ServerSyncCodexThreadsFailure = Schema.Struct({
+  codexThreadId: TrimmedNonEmptyString,
+  message: TrimmedNonEmptyString,
+});
+export type ServerSyncCodexThreadsFailure = typeof ServerSyncCodexThreadsFailure.Type;
+
+export const ServerSyncCodexThreadsResult = Schema.Struct({
+  scanned: Schema.Number,
+  imported: Schema.Number,
+  skippedExisting: Schema.Number,
+  skippedArchived: Schema.Number,
+  createdProjects: Schema.Number,
+  failed: Schema.Array(ServerSyncCodexThreadsFailure),
+});
+export type ServerSyncCodexThreadsResult = typeof ServerSyncCodexThreadsResult.Type;
