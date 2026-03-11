@@ -57,7 +57,10 @@ import { GitCore } from "./git/Services/GitCore.ts";
 import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
-import { CodexThreadSync, type CodexThreadSyncShape } from "./codexSync/Services/CodexThreadSync.ts";
+import {
+  CodexThreadSync,
+  type CodexThreadSyncShape,
+} from "./codexSync/Services/CodexThreadSync.ts";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -552,7 +555,8 @@ describe("WebSocket Server", () => {
       ? Layer.succeed(CodexThreadSync, options.codexThreadSync)
       : options.providerLayer
         ? Layer.succeed(CodexThreadSync, {
-            syncThreads: () => Effect.fail(new Error("Codex thread sync is not available in this test setup.")),
+            syncThreads: () =>
+              Effect.fail(new Error("Codex thread sync is not available in this test setup.")),
           })
         : makeServerSyncLayer().pipe(Layer.provide(defaultBaseRuntimeLayer));
     const runtimeLayer = Layer.merge(baseRuntimeLayer, codexThreadSyncLayer);
@@ -660,6 +664,103 @@ describe("WebSocket Server", () => {
     expect(bytes).toEqual(Buffer.from("hello-encoded-attachment"));
   });
 
+  it("serves absolute text files from the local filesystem", async () => {
+    const filePath = path.join(makeTempDir("t3code-absolute-text-file-"), "test.txt");
+    fs.writeFileSync(filePath, "hello-absolute-file", "utf8");
+
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}${filePath}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(await response.text()).toBe("hello-absolute-file");
+  });
+
+  it("serves absolute image files from the local filesystem", async () => {
+    const filePath = path.join(makeTempDir("t3code-absolute-image-file-"), "test.png");
+    fs.writeFileSync(filePath, Buffer.from("not-a-real-png"));
+
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}${filePath}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("image/png");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    expect(bytes).toEqual(Buffer.from("not-a-real-png"));
+  });
+
+  it("serves absolute files when the request path includes a line suffix", async () => {
+    const filePath = path.join(makeTempDir("t3code-absolute-line-file-"), "test.txt");
+    fs.writeFileSync(filePath, "hello-line-suffix", "utf8");
+
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}${filePath}:42`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("hello-line-suffix");
+  });
+
+  it("returns 404 for missing absolute file paths instead of falling back to SPA html", async () => {
+    const stateDir = makeTempDir("t3code-state-absolute-missing-");
+    const staticDir = makeTempDir("t3code-static-absolute-missing-");
+    const filePath = path.join(makeTempDir("t3code-absolute-missing-file-"), "missing.png");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>static-root</h1>", "utf8");
+
+    server = await createTestServer({ cwd: "/test/project", stateDir, staticDir });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}${filePath}`);
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("Not Found");
+  });
+
+  it("keeps single-segment app routes on the SPA handler", async () => {
+    const stateDir = makeTempDir("t3code-state-single-segment-routes-");
+    const staticDir = makeTempDir("t3code-static-single-segment-routes-");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>static-root</h1>", "utf8");
+
+    server = await createTestServer({ cwd: "/test/project", stateDir, staticDir });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const settingsResponse = await fetch(`http://127.0.0.1:${port}/settings`);
+    expect(settingsResponse.status).toBe(200);
+    expect(await settingsResponse.text()).toContain("static-root");
+
+    const threadResponse = await fetch(`http://127.0.0.1:${port}/thread-route`);
+    expect(threadResponse.status).toBe(200);
+    expect(await threadResponse.text()).toContain("static-root");
+  });
+
+  it("supports HEAD requests for absolute files", async () => {
+    const filePath = path.join(makeTempDir("t3code-absolute-head-file-"), "test.txt");
+    fs.writeFileSync(filePath, "head-only", "utf8");
+
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}${filePath}`, {
+      method: "HEAD",
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(await response.text()).toBe("");
+  });
+
   it("serves static index for root path", async () => {
     const stateDir = makeTempDir("t3code-state-static-root-");
     const staticDir = makeTempDir("t3code-static-root-");
@@ -675,6 +776,25 @@ describe("WebSocket Server", () => {
     expect(await response.text()).toContain("static-root");
   });
 
+  it("serves built static assets before absolute file routing", async () => {
+    const stateDir = makeTempDir("t3code-state-static-assets-");
+    const staticDir = makeTempDir("t3code-static-assets-");
+    const assetPath = path.join(staticDir, "assets", "index.js");
+    fs.mkdirSync(path.dirname(assetPath), { recursive: true });
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>static-root</h1>", "utf8");
+    fs.writeFileSync(assetPath, "console.log('asset');", "utf8");
+
+    server = await createTestServer({ cwd: "/test/project", stateDir, staticDir });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const response = await fetch(`http://127.0.0.1:${port}/assets/index.js`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/javascript");
+    expect(await response.text()).toBe("console.log('asset');");
+  });
+
   it("rejects static path traversal attempts", async () => {
     const stateDir = makeTempDir("t3code-state-static-traversal-");
     const staticDir = makeTempDir("t3code-static-traversal-");
@@ -687,7 +807,7 @@ describe("WebSocket Server", () => {
 
     const response = await requestPath(port, "/..%2f..%2fetc/passwd");
     expect(response.statusCode).toBe(400);
-    expect(response.body).toBe("Invalid static file path");
+    expect(response.body).toBe("Invalid file path");
   });
 
   it("bootstraps the cwd project on startup when enabled", async () => {

@@ -61,6 +61,7 @@ import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
+import { matchAbsoluteFileRoute } from "./absoluteFileRoute";
 import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
@@ -491,6 +492,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return;
         }
 
+        const absoluteFileRoute = matchAbsoluteFileRoute(url.pathname, req.method);
+        if (absoluteFileRoute.kind === "invalid") {
+          respond(400, { "Content-Type": "text/plain" }, "Invalid file path");
+          return;
+        }
+
         // In dev mode, redirect to Vite dev server
         if (devUrl) {
           respond(302, { Location: devUrl.href });
@@ -499,6 +506,47 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
         // Serve static files from the web app build
         if (!staticDir) {
+          if (absoluteFileRoute.kind === "matched") {
+            const fileInfo = yield* fileSystem
+              .stat(absoluteFileRoute.filePath)
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+            if (!fileInfo || fileInfo.type !== "File") {
+              respond(404, { "Content-Type": "text/plain" }, "Not Found");
+              return;
+            }
+
+            const contentType =
+              Mime.getType(absoluteFileRoute.filePath) ?? "application/octet-stream";
+            res.writeHead(200, {
+              "Content-Type": contentType,
+              "Cache-Control": "no-store",
+            });
+            if (req.method === "HEAD") {
+              res.end();
+              return;
+            }
+
+            const streamExit = yield* Stream.runForEach(
+              fileSystem.stream(absoluteFileRoute.filePath),
+              (chunk) =>
+                Effect.sync(() => {
+                  if (!res.destroyed) {
+                    res.write(chunk);
+                  }
+                }),
+            ).pipe(Effect.exit);
+            if (Exit.isFailure(streamExit)) {
+              if (!res.destroyed) {
+                res.destroy();
+              }
+              return;
+            }
+            if (!res.writableEnded) {
+              res.end();
+            }
+            return;
+          }
+
           respond(
             503,
             { "Content-Type": "text/plain" },
@@ -548,6 +596,47 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           .stat(filePath)
           .pipe(Effect.catch(() => Effect.succeed(null)));
         if (!fileInfo || fileInfo.type !== "File") {
+          if (absoluteFileRoute.kind === "matched") {
+            const absoluteFileInfo = yield* fileSystem
+              .stat(absoluteFileRoute.filePath)
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+            if (!absoluteFileInfo || absoluteFileInfo.type !== "File") {
+              respond(404, { "Content-Type": "text/plain" }, "Not Found");
+              return;
+            }
+
+            const contentType =
+              Mime.getType(absoluteFileRoute.filePath) ?? "application/octet-stream";
+            res.writeHead(200, {
+              "Content-Type": contentType,
+              "Cache-Control": "no-store",
+            });
+            if (req.method === "HEAD") {
+              res.end();
+              return;
+            }
+
+            const streamExit = yield* Stream.runForEach(
+              fileSystem.stream(absoluteFileRoute.filePath),
+              (chunk) =>
+                Effect.sync(() => {
+                  if (!res.destroyed) {
+                    res.write(chunk);
+                  }
+                }),
+            ).pipe(Effect.exit);
+            if (Exit.isFailure(streamExit)) {
+              if (!res.destroyed) {
+                res.destroy();
+              }
+              return;
+            }
+            if (!res.writableEnded) {
+              res.end();
+            }
+            return;
+          }
+
           const indexPath = path.resolve(staticRoot, "index.html");
           const indexData = yield* fileSystem
             .readFile(indexPath)
