@@ -57,7 +57,8 @@ function isSatisfiedArchiveFailure(cause: unknown): boolean {
     message.includes("no such thread") ||
     message.includes("unknown thread") ||
     message.includes("does not exist") ||
-    message.includes("not found")
+    message.includes("not found") ||
+    message.includes("no rollout found")
   );
 }
 
