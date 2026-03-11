@@ -909,13 +909,34 @@ export default function Sidebar() {
       const api = readNativeApi();
       if (!api) return;
       const clicked = await api.contextMenu.show(
-        [{ id: "delete", label: "Delete", destructive: true }],
+        [
+          { id: "copy-absolute-path", label: "Copy absolute path" },
+          { id: "delete", label: "Delete", destructive: true },
+        ],
         position,
       );
-      if (clicked !== "delete") return;
-
       const project = projects.find((entry) => entry.id === projectId);
       if (!project) return;
+
+      if (clicked === "copy-absolute-path") {
+        try {
+          await copyTextToClipboard(project.cwd);
+          toastManager.add({
+            type: "success",
+            title: "Project path copied",
+            description: project.cwd,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to copy project path",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
+        return;
+      }
+
+      if (clicked !== "delete") return;
 
       const projectThreads = threads.filter((thread) => thread.projectId === projectId);
       if (projectThreads.length > 0) {
