@@ -812,6 +812,22 @@ export default function Sidebar() {
       });
     },
   });
+  const { copyToClipboard: copyProjectPathToClipboard } = useCopyToClipboard<{ path: string }>({
+    onCopy: (ctx) => {
+      toastManager.add({
+        type: "success",
+        title: "Project path copied",
+        description: ctx.path,
+      });
+    },
+    onError: (error) => {
+      toastManager.add({
+        type: "error",
+        title: "Failed to copy project path",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    },
+  });
   const handleThreadContextMenu = useCallback(
     async (threadId: ThreadId, position: { x: number; y: number }) => {
       const api = readNativeApi();
@@ -978,13 +994,21 @@ export default function Sidebar() {
       const api = readNativeApi();
       if (!api) return;
       const clicked = await api.contextMenu.show(
-        [{ id: "delete", label: "Remove project", destructive: true }],
+        [
+          { id: "copy-absolute-path", label: "Copy absolute path" },
+          { id: "delete", label: "Remove project", destructive: true },
+        ],
         position,
       );
-      if (clicked !== "delete") return;
-
       const project = projects.find((entry) => entry.id === projectId);
       if (!project) return;
+
+      if (clicked === "copy-absolute-path") {
+        copyProjectPathToClipboard(project.cwd, { path: project.cwd });
+        return;
+      }
+
+      if (clicked !== "delete") return;
 
       const projectThreads = threads.filter((thread) => thread.projectId === projectId);
       if (projectThreads.length > 0) {
@@ -1023,6 +1047,7 @@ export default function Sidebar() {
     [
       clearComposerDraftForThread,
       clearProjectDraftThreadId,
+      copyProjectPathToClipboard,
       getDraftThreadByProjectId,
       projects,
       threads,
