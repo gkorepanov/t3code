@@ -1,0 +1,18 @@
+[Unit]
+Description=T3 Code
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/gkorepanov/codex_ui/t3/t3code
+Environment=T3CODE_NO_BROWSER=1
+ExecStart=/usr/bin/env node apps/server/dist/index.mjs --port 7658 --host 127.0.0.1
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=20
+User=gkorepanov
+Group=gkorepanov
+
+[Install]
+WantedBy=multi-user.target
