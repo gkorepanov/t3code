@@ -159,7 +159,10 @@ describe("CodexThreadSyncLive", () => {
     fs.mkdirSync(codexHome, { recursive: true });
     fs.writeFileSync(
       path.join(codexHome, "session_index.jsonl"),
-      JSON.stringify({ id: "codex-new", thread_name: "Imported from index" }),
+      [
+        JSON.stringify({ id: "codex-existing", thread_name: "Existing from index" }),
+        JSON.stringify({ id: "codex-new", thread_name: "Imported from index" }),
+      ].join("\n"),
       "utf8",
     );
 
@@ -193,8 +196,8 @@ describe("CodexThreadSyncLive", () => {
     codexDb.exec(`
       INSERT INTO threads (id, created_at, updated_at, cwd, title, first_user_message, archived)
       VALUES
-        ('codex-existing', 1773230000, 1773230001, '/workspace/existing', 'Existing', 'Existing', 0),
-        ('codex-new', 1773230002, 1773230005, '/workspace/imported', '', 'First imported user message', 0),
+        ('codex-existing', 1773230000, 1773230001, '/workspace/existing', 'Existing sqlite title', 'Existing sqlite title', 0),
+        ('codex-new', 1773230002, 1773230005, '/workspace/imported', 'Imported sqlite title', 'First imported user message', 0),
         ('codex-archived', 1773230003, 1773230004, '/workspace/archived', 'Archived', 'Archived', 1);
     `);
     codexDb.close();
@@ -291,7 +294,7 @@ describe("CodexThreadSyncLive", () => {
           commandId: CommandId.makeUnsafe("cmd-thread-existing"),
           threadId: existingThreadId,
           projectId: existingProjectId,
-          title: "Existing Thread",
+          title: "Existing Thread Before Sync",
           model: "gpt-5.4",
           runtimeMode: "full-access",
           interactionMode: "default",
@@ -329,6 +332,7 @@ describe("CodexThreadSyncLive", () => {
       });
 
       const snapshot = await runtime.runPromise(projectionSnapshotQuery.getSnapshot());
+      const existingThread = snapshot.threads.find((thread) => thread.id === existingThreadId);
       const importedProject = snapshot.projects.find(
         (project) => project.workspaceRoot === "/workspace/imported",
       );
@@ -336,6 +340,7 @@ describe("CodexThreadSyncLive", () => {
         (thread) => thread.projectId === importedProject?.id,
       );
 
+      expect(existingThread?.title).toBe("Existing from index");
       expect(importedProject?.title).toBe("imported");
       expect(importedThread?.title).toBe("Imported from index");
       expect(
