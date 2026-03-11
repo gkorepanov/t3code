@@ -36,6 +36,8 @@ import type {
   TerminalWriteInput,
 } from "./terminal";
 import type {
+  ServerArchiveCodexThreadInput,
+  ServerArchiveCodexThreadResult,
   ServerSyncCodexThreadsInput,
   ServerSyncCodexThreadsResult,
   ServerUpsertKeybindingInput,
@@ -165,6 +167,9 @@ export interface NativeApi {
     getConfig: () => Promise<ServerConfig>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     syncCodexThreads: (input: ServerSyncCodexThreadsInput) => Promise<ServerSyncCodexThreadsResult>;
+    archiveCodexThread: (
+      input: ServerArchiveCodexThreadInput,
+    ) => Promise<ServerArchiveCodexThreadResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

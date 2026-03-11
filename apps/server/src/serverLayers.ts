@@ -38,6 +38,7 @@ import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
 import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { CodexAdapter } from "./provider/Services/CodexAdapter.ts";
+import { CodexThreadArchiveLive } from "./codexSync/Layers/CodexThreadArchive.ts";
 import { CodexThreadSyncLive } from "./codexSync/Layers/CodexThreadSync.ts";
 
 export function makeServerProviderLayer(): Layer.Layer<
@@ -77,7 +78,7 @@ export function makeServerProviderLayer(): Layer.Layer<
 }
 
 export function makeServerSyncLayer() {
-  return CodexThreadSyncLive;
+  return Layer.mergeAll(CodexThreadSyncLive, CodexThreadArchiveLive);
 }
 
 export function makeServerRuntimeServicesLayer() {
