@@ -42,6 +42,7 @@ import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isMacPlatform, newCommandId, newProjectId, newThreadId } from "../lib/utils";
 import { useStore } from "../store";
+import type { Thread } from "../types";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
 import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/gitReactQuery";
@@ -103,6 +104,17 @@ function formatRelativeTime(iso: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+function compareThreadsByRecentActivity(
+  left: Pick<Thread, "createdAt" | "id" | "updatedAt">,
+  right: Pick<Thread, "createdAt" | "id" | "updatedAt">,
+): number {
+  return (
+    (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "") ||
+    right.createdAt.localeCompare(left.createdAt) ||
+    right.id.localeCompare(left.id)
+  );
 }
 
 interface TerminalStatusIndicator {
@@ -328,6 +340,27 @@ export default function Sidebar() {
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
   );
+  const sortedProjects = useMemo(() => {
+    const latestThreadUpdatedAtByProjectId = new Map<ProjectId, string>();
+    for (const thread of threads) {
+      const updatedAt = thread.updatedAt ?? thread.createdAt;
+      const current = latestThreadUpdatedAtByProjectId.get(thread.projectId);
+      if (!current || updatedAt.localeCompare(current) > 0) {
+        latestThreadUpdatedAtByProjectId.set(thread.projectId, updatedAt);
+      }
+    }
+
+    const projectIndexById = new Map(
+      projects.map((project, index) => [project.id, index] as const),
+    );
+    return projects.toSorted((left, right) => {
+      const byUpdatedAt = (latestThreadUpdatedAtByProjectId.get(right.id) ?? "").localeCompare(
+        latestThreadUpdatedAtByProjectId.get(left.id) ?? "",
+      );
+      if (byUpdatedAt !== 0) return byUpdatedAt;
+      return (projectIndexById.get(left.id) ?? 0) - (projectIndexById.get(right.id) ?? 0);
+    });
+  }, [projects, threads]);
   const threadGitTargets = useMemo(
     () =>
       threads.map((thread) => ({
@@ -476,11 +509,7 @@ export default function Sidebar() {
     (projectId: ProjectId) => {
       const latestThread = threads
         .filter((thread) => thread.projectId === projectId)
-        .toSorted((a, b) => {
-          const byDate = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          if (byDate !== 0) return byDate;
-          return b.id.localeCompare(a.id);
-        })[0];
+        .toSorted(compareThreadsByRecentActivity)[0];
       if (!latestThread) return;
 
       void navigate({
@@ -1473,18 +1502,13 @@ export default function Sidebar() {
           >
             <SidebarMenu>
               <SortableContext
-                items={projects.map((project) => project.id)}
+                items={sortedProjects.map((project) => project.id)}
                 strategy={verticalListSortingStrategy}
               >
-                {projects.map((project) => {
+                {sortedProjects.map((project) => {
                   const projectThreads = threads
                     .filter((thread) => thread.projectId === project.id)
-                    .toSorted((a, b) => {
-                      const byDate =
-                        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-                      if (byDate !== 0) return byDate;
-                      return b.id.localeCompare(a.id);
-                    });
+                    .toSorted(compareThreadsByRecentActivity);
                   const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
                   const hasHiddenThreads = projectThreads.length > THREAD_PREVIEW_LIMIT;
                   const visibleThreads =
