@@ -177,7 +177,7 @@ export const CodexThreadSyncLive = Layer.effect(
             return providerThreadId ? [providerThreadId] : [];
           }),
         );
-        const syncedThreadIdsByCodexThreadId = new Map<string, ThreadId[]>();
+        const linkedThreadIdsByCodexThreadId = new Map<string, ThreadId[]>();
         readModel.threads
           .filter((thread) => thread.deletedAt === null)
           .forEach((thread) => {
@@ -185,10 +185,24 @@ export const CodexThreadSyncLive = Layer.effect(
             if (!codexThreadId) {
               return;
             }
-            const threadIds = syncedThreadIdsByCodexThreadId.get(codexThreadId) ?? [];
+            const threadIds = linkedThreadIdsByCodexThreadId.get(codexThreadId) ?? [];
             threadIds.push(thread.id);
-            syncedThreadIdsByCodexThreadId.set(codexThreadId, threadIds);
+            linkedThreadIdsByCodexThreadId.set(codexThreadId, threadIds);
           });
+        existingProviderRuntimeRows.forEach((row) => {
+          if (!activeThreadIds.has(row.threadId)) {
+            return;
+          }
+          const codexThreadId = readResumeCursorThreadId(row.resumeCursor);
+          if (!codexThreadId) {
+            return;
+          }
+          const threadIds = linkedThreadIdsByCodexThreadId.get(codexThreadId) ?? [];
+          if (!threadIds.includes(row.threadId)) {
+            threadIds.push(row.threadId);
+            linkedThreadIdsByCodexThreadId.set(codexThreadId, threadIds);
+          }
+        });
         const projectIdByWorkspaceRoot = new Map<string, ProjectId>(
           readModel.projects
             .filter((project) => project.deletedAt === null)
@@ -206,10 +220,26 @@ export const CodexThreadSyncLive = Layer.effect(
             skippedArchived += 1;
             continue;
           }
+          const resolvedTitle = resolveImportedThreadTitle({
+            title: candidate.title,
+            indexTitle: indexTitles.get(candidate.codexThreadId),
+            firstUserMessage: candidate.firstUserMessage,
+          });
           const existingSyncedThreadIds =
-            syncedThreadIdsByCodexThreadId.get(candidate.codexThreadId) ?? [];
+            linkedThreadIdsByCodexThreadId.get(candidate.codexThreadId) ?? [];
           if (existingSyncedThreadIds.length > 0) {
             for (const existingThreadId of existingSyncedThreadIds) {
+              const existingThread = readModel.threads.find(
+                (thread) => thread.id === existingThreadId,
+              );
+              if (existingThread && existingThread.title !== resolvedTitle) {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.meta.update",
+                  commandId: makeCommandId("title", candidate.codexThreadId),
+                  threadId: existingThreadId,
+                  title: resolvedTitle,
+                });
+              }
               if (existingRuntimeByThreadId.has(existingThreadId)) {
                 continue;
               }
@@ -288,11 +318,7 @@ export const CodexThreadSyncLive = Layer.effect(
                 commandId: makeCommandId("thread", candidate.codexThreadId),
                 threadId,
                 projectId,
-                title: resolveImportedThreadTitle({
-                  title: candidate.title,
-                  indexTitle: indexTitles.get(candidate.codexThreadId),
-                  firstUserMessage: candidate.firstUserMessage,
-                }),
+                title: resolvedTitle,
                 model: project?.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex,
                 runtimeMode: "full-access",
                 interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
