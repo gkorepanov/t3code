@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ProviderKind } from "./orchestration";
@@ -91,3 +91,15 @@ export const ServerSyncCodexThreadsResult = Schema.Struct({
   failed: Schema.Array(ServerSyncCodexThreadsFailure),
 });
 export type ServerSyncCodexThreadsResult = typeof ServerSyncCodexThreadsResult.Type;
+
+export const ServerArchiveCodexThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  codexBinaryPath: Schema.optional(TrimmedNonEmptyString),
+  codexHomePath: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerArchiveCodexThreadInput = typeof ServerArchiveCodexThreadInput.Type;
+
+export const ServerArchiveCodexThreadResult = Schema.Struct({
+  codexThreadId: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerArchiveCodexThreadResult = typeof ServerArchiveCodexThreadResult.Type;

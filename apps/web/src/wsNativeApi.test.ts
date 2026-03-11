@@ -401,6 +401,26 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards Codex archive requests to the websocket server method", async () => {
+    requestMock.mockResolvedValue({
+      codexThreadId: "codex-thread-1",
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.server.archiveCodexThread({
+      threadId: ThreadId.makeUnsafe("thread:codex-sync:codex-thread-1:local"),
+      codexHomePath: "/tmp/.codex",
+      codexBinaryPath: "/usr/local/bin/codex",
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(WS_METHODS.serverArchiveCodexThread, {
+      threadId: "thread:codex-sync:codex-thread-1:local",
+      codexHomePath: "/tmp/.codex",
+      codexBinaryPath: "/usr/local/bin/codex",
+    });
+  });
+
   it("forwards full-thread diff requests to the orchestration websocket method", async () => {
     requestMock.mockResolvedValue({ diff: "patch" });
     const { createWsNativeApi } = await import("./wsNativeApi");

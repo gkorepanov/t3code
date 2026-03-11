@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { ImportedThreadMessage, TurnId } from "@t3tools/contracts";
+import type { ImportedThreadMessage, ThreadId, TurnId } from "@t3tools/contracts";
 import { MessageId } from "@t3tools/contracts";
 import type { ProviderThreadSnapshot } from "../provider/Services/ProviderAdapter.ts";
 
@@ -219,6 +219,18 @@ export function readResumeCursorThreadId(resumeCursor: unknown): string | undefi
   const record = asRecord(resumeCursor);
   const threadId = record ? asString(record.threadId) : undefined;
   return threadId && threadId.trim().length > 0 ? threadId.trim() : undefined;
+}
+
+export function readSyncedCodexThreadId(threadId: ThreadId): string | undefined {
+  const prefix = "thread:codex-sync:";
+  if (!threadId.startsWith(prefix)) {
+    return undefined;
+  }
+  const lastSeparatorIndex = threadId.lastIndexOf(":");
+  if (lastSeparatorIndex <= prefix.length) {
+    return undefined;
+  }
+  return threadId.slice(prefix.length, lastSeparatorIndex);
 }
 
 export function resolveImportedThreadTitle(input: {

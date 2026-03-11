@@ -697,7 +697,31 @@ export default function Sidebar() {
           ].join("\n"),
         ));
 
-      if (thread.session && thread.session.status !== "closed") {
+      let archivedCodexThreadId: string | null = null;
+      try {
+        const archiveResult = await api.server.archiveCodexThread({
+          threadId,
+          ...(appSettings.codexBinaryPath.trim().length > 0
+            ? { codexBinaryPath: appSettings.codexBinaryPath.trim() }
+            : {}),
+          ...(appSettings.codexHomePath.trim().length > 0
+            ? { codexHomePath: appSettings.codexHomePath.trim() }
+            : {}),
+        });
+        archivedCodexThreadId = archiveResult.codexThreadId;
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to archive Codex thread",
+          description:
+            error instanceof Error
+              ? error.message
+              : "The linked Codex thread could not be archived, so the T3 thread was not deleted.",
+        });
+        return;
+      }
+
+      if (archivedCodexThreadId === null && thread.session && thread.session.status !== "closed") {
         await api.orchestration
           .dispatchCommand({
             type: "thread.session.stop",
@@ -773,6 +797,8 @@ export default function Sidebar() {
       clearProjectDraftThreadById,
       clearTerminalState,
       navigate,
+      appSettings.codexBinaryPath,
+      appSettings.codexHomePath,
       projects,
       removeWorktreeMutation,
       routeThreadId,
