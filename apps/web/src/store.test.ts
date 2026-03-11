@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  MessageId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -215,6 +216,59 @@ describe("store pure functions", () => {
 });
 
 describe("store read model sync", () => {
+  it("normalizes synced Codex wrapper text for imported titles and user messages", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        id: ThreadId.makeUnsafe("thread:codex-sync:codex-1:thread-1"),
+        title: [
+          "<environment_context>",
+          "  <cwd>/tmp/demo</cwd>",
+          "</environment_context>",
+          "",
+          "## My request for Codex:",
+          "Fix the failing test",
+        ].join("\n"),
+        messages: [
+          {
+            id: MessageId.makeUnsafe("message-1"),
+            role: "user",
+            text: [
+              "# Files mentioned by the user:",
+              "[foo.py](/tmp/foo.py)",
+              "",
+              "## My request for Codex:",
+              "Read the file and patch it",
+            ].join("\n"),
+            attachments: [],
+            streaming: false,
+            createdAt: "2026-02-27T00:00:00.000Z",
+            updatedAt: "2026-02-27T00:00:00.000Z",
+            turnId: TurnId.makeUnsafe("turn-1"),
+          },
+          {
+            id: MessageId.makeUnsafe("message-2"),
+            role: "assistant",
+            text: "Working on it",
+            attachments: [],
+            streaming: false,
+            createdAt: "2026-02-27T00:00:01.000Z",
+            updatedAt: "2026-02-27T00:00:01.000Z",
+            turnId: TurnId.makeUnsafe("turn-1"),
+          },
+        ],
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.title).toBe("Fix the failing test");
+    expect(next.threads[0]?.messages.map((message) => message.text)).toEqual([
+      "Read the file and patch it",
+      "Working on it",
+    ]);
+  });
+
   it("preserves claude model slugs without an active session", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(

@@ -120,6 +120,85 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  it("imports historical thread messages through the internal sync command", async () => {
+    const createdAt = now();
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-project-import-create"),
+        projectId: asProjectId("project-import"),
+        title: "Imported Project",
+        workspaceRoot: "/tmp/imported-project",
+        defaultModel: "gpt-5.4",
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-thread-import-create"),
+        threadId: ThreadId.makeUnsafe("thread-import"),
+        projectId: asProjectId("project-import"),
+        title: "Imported Thread",
+        model: "gpt-5.4",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.history.import",
+        commandId: CommandId.makeUnsafe("cmd-thread-import-history"),
+        threadId: ThreadId.makeUnsafe("thread-import"),
+        createdAt,
+        messages: [
+          {
+            messageId: asMessageId("msg-import-user"),
+            role: "user",
+            text: "hello",
+            turnId: asTurnId("turn-import-1"),
+            createdAt,
+            updatedAt: createdAt,
+          },
+          {
+            messageId: asMessageId("msg-import-assistant"),
+            role: "assistant",
+            text: "world",
+            turnId: asTurnId("turn-import-1"),
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+      }),
+    );
+
+    const readModel = await system.run(engine.getReadModel());
+    const importedThread = readModel.threads.find((thread) => thread.id === "thread-import");
+
+    expect(
+      importedThread?.messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        text: message.text,
+      })),
+    ).toEqual([
+      { id: "msg-import-user", role: "user", text: "hello" },
+      { id: "msg-import-assistant", role: "assistant", text: "world" },
+    ]);
+
+    const replayedEvents = await system
+      .run(Stream.runCollect(engine.readEvents(0)))
+      .then((events) => Array.from(events));
+    expect(replayedEvents.filter((event) => event.type === "thread.message-sent")).toHaveLength(2);
+    await system.dispose();
+  });
+
   it("replays append-only events from sequence", async () => {
     const system = await createOrchestrationSystem();
     const { engine } = system;
