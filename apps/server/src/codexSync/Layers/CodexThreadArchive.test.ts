@@ -190,4 +190,55 @@ describe("CodexThreadArchiveLive", () => {
       }),
     );
   });
+
+  it("treats missing-rollout archive failures as already archived", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const threadId = ThreadId.makeUnsafe("thread:codex-sync:codex-thread-1:local-thread");
+        const manager = new FakeCodexManager();
+        manager.archiveThreadImpl.mockRejectedValueOnce(
+          new Error("thread/resume failed: no rollout found for thread id codex-thread-1"),
+        );
+
+        const archiveLayer = makeCodexThreadArchiveLive({
+          makeManager: () => manager,
+        }).pipe(
+          Layer.provideMerge(
+            Layer.succeed(OrchestrationEngineService, {
+              getReadModel: () => Effect.succeed(makeReadModel(threadId)),
+              readEvents: () => Stream.empty,
+              dispatch: () => Effect.die("dispatch not used"),
+              streamDomainEvents: Stream.empty,
+            }),
+          ),
+          Layer.provideMerge(makeRuntimeRepositoryLayer()),
+          Layer.provideMerge(
+            Layer.succeed(ProviderService, {
+              startSession: () => Effect.die("startSession not used"),
+              sendTurn: () => Effect.die("sendTurn not used"),
+              interruptTurn: () => Effect.void,
+              respondToRequest: () => Effect.void,
+              respondToUserInput: () => Effect.void,
+              stopSession: () => Effect.void,
+              listSessions: () => Effect.succeed([]),
+              getCapabilities: () => Effect.die("getCapabilities not used"),
+              rollbackConversation: () => Effect.void,
+              streamEvents: Stream.empty,
+            }),
+          ),
+        );
+
+        const archive = yield* Effect.service(CodexThreadArchive).pipe(
+          Effect.provide(archiveLayer),
+        );
+        const result = yield* archive.archiveThread({
+          threadId,
+        });
+
+        expect(result).toEqual({
+          codexThreadId: "codex-thread-1",
+        });
+      }),
+    );
+  });
 });

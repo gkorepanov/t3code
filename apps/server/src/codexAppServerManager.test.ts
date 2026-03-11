@@ -190,6 +190,14 @@ describe("isRecoverableThreadResumeError", () => {
     ).toBe(true);
   });
 
+  it("matches missing-rollout resume errors", () => {
+    expect(
+      isRecoverableThreadResumeError(
+        new Error("thread/resume failed: no rollout found for thread id thread_1"),
+      ),
+    ).toBe(true);
+  });
+
   it("ignores non-resume errors", () => {
     expect(
       isRecoverableThreadResumeError(new Error("thread/start failed: permission denied")),

@@ -643,7 +643,10 @@ export default function Sidebar() {
   const deleteThread = useCallback(
     async (
       threadId: ThreadId,
-      opts: { deletedThreadIds?: ReadonlySet<ThreadId> } = {},
+      opts: {
+        deletedThreadIds?: ReadonlySet<ThreadId>;
+        skipCodexArchive?: boolean;
+      } = {},
     ): Promise<void> => {
       const api = readNativeApi();
       if (!api) return;
@@ -676,27 +679,29 @@ export default function Sidebar() {
         ));
 
       let archivedCodexThreadId: string | null = null;
-      try {
-        const archiveResult = await api.server.archiveCodexThread({
-          threadId,
-          ...(appSettings.codexBinaryPath.trim().length > 0
-            ? { codexBinaryPath: appSettings.codexBinaryPath.trim() }
-            : {}),
-          ...(appSettings.codexHomePath.trim().length > 0
-            ? { codexHomePath: appSettings.codexHomePath.trim() }
-            : {}),
-        });
-        archivedCodexThreadId = archiveResult.codexThreadId;
-      } catch (error) {
-        toastManager.add({
-          type: "error",
-          title: "Failed to archive Codex thread",
-          description:
-            error instanceof Error
-              ? error.message
-              : "The linked Codex thread could not be archived, so the T3 thread was not deleted.",
-        });
-        return;
+      if (!opts.skipCodexArchive) {
+        try {
+          const archiveResult = await api.server.archiveCodexThread({
+            threadId,
+            ...(appSettings.codexBinaryPath.trim().length > 0
+              ? { codexBinaryPath: appSettings.codexBinaryPath.trim() }
+              : {}),
+            ...(appSettings.codexHomePath.trim().length > 0
+              ? { codexHomePath: appSettings.codexHomePath.trim() }
+              : {}),
+          });
+          archivedCodexThreadId = archiveResult.codexThreadId;
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to archive Codex thread",
+            description:
+              error instanceof Error
+                ? error.message
+                : "The linked Codex thread could not be archived, so the T3 thread was not deleted.",
+          });
+          return;
+        }
       }
 
       if (archivedCodexThreadId === null && thread.session && thread.session.status !== "closed") {
@@ -788,6 +793,7 @@ export default function Sidebar() {
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
+          { id: "delete-no-codex-archive", label: "Delete w/o Codex archive", destructive: true },
           { id: "delete", label: "Delete", destructive: true },
         ],
         position,
@@ -823,7 +829,7 @@ export default function Sidebar() {
         }
         return;
       }
-      if (clicked !== "delete") return;
+      if (clicked !== "delete" && clicked !== "delete-no-codex-archive") return;
       if (appSettings.confirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
           [
@@ -835,7 +841,9 @@ export default function Sidebar() {
           return;
         }
       }
-      await deleteThread(threadId);
+      await deleteThread(threadId, {
+        skipCodexArchive: clicked === "delete-no-codex-archive",
+      });
     },
     [appSettings.confirmThreadDelete, deleteThread, markThreadUnread, threads],
   );
