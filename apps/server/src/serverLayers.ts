@@ -10,6 +10,7 @@ import { ServerConfig } from "./config";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
+import { ProviderSessionRuntimeRepository } from "./persistence/Services/ProviderSessionRuntime.ts";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
@@ -36,9 +37,11 @@ import { GitServiceLive } from "./git/Layers/GitService";
 import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
 import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { CodexAdapter } from "./provider/Services/CodexAdapter.ts";
+import { CodexThreadSyncLive } from "./codexSync/Layers/CodexThreadSync.ts";
 
 export function makeServerProviderLayer(): Layer.Layer<
-  ProviderService,
+  ProviderService | CodexAdapter | ProviderSessionRuntimeRepository,
   ProviderUnsupportedError,
   SqlClient.SqlClient | ServerConfig | FileSystem.FileSystem | AnalyticsService
 > {
@@ -62,10 +65,19 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(codexAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
-    return makeProviderServiceLive(
+    const providerServiceLayer = makeProviderServiceLive(
       canonicalEventLogger ? { canonicalEventLogger } : undefined,
     ).pipe(Layer.provide(adapterRegistryLayer), Layer.provide(providerSessionDirectoryLayer));
+    return Layer.mergeAll(
+      ProviderSessionRuntimeRepositoryLive,
+      codexAdapterLayer,
+      providerServiceLayer,
+    );
   }).pipe(Layer.unwrap);
+}
+
+export function makeServerSyncLayer() {
+  return CodexThreadSyncLive;
 }
 
 export function makeServerRuntimeServicesLayer() {

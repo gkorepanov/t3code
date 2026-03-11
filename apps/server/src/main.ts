@@ -19,7 +19,7 @@ import {
 import { fixPath, resolveStateDir } from "./os-jank";
 import { Open } from "./open";
 import * as SqlitePersistence from "./persistence/Layers/Sqlite";
-import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
+import { makeServerProviderLayer, makeServerRuntimeServicesLayer, makeServerSyncLayer } from "./serverLayers";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { Server } from "./wsServer";
@@ -193,16 +193,29 @@ const ServerConfigLive = (input: CliInput) =>
     }),
   );
 
-const LayerLive = (input: CliInput) =>
-  Layer.empty.pipe(
-    Layer.provideMerge(makeServerRuntimeServicesLayer()),
-    Layer.provideMerge(makeServerProviderLayer()),
-    Layer.provideMerge(ProviderHealthLive),
+const LayerLive = (input: CliInput) => {
+  const serverConfigLayer = ServerConfigLive(input);
+  const providerLayer = makeServerProviderLayer().pipe(
     Layer.provideMerge(SqlitePersistence.layerConfig),
-    Layer.provideMerge(ServerLoggerLive),
     Layer.provideMerge(AnalyticsServiceLayerLive),
-    Layer.provideMerge(ServerConfigLive(input)),
+    Layer.provideMerge(serverConfigLayer),
   );
+  const runtimeLayer = Layer.merge(
+    makeServerRuntimeServicesLayer().pipe(Layer.provide(providerLayer)),
+    providerLayer,
+  );
+
+  return Layer.mergeAll(
+    runtimeLayer,
+    makeServerSyncLayer().pipe(Layer.provide(runtimeLayer)),
+    ProviderHealthLive,
+    ServerLoggerLive,
+  ).pipe(
+    Layer.provideMerge(SqlitePersistence.layerConfig),
+    Layer.provideMerge(AnalyticsServiceLayerLive),
+    Layer.provideMerge(serverConfigLayer),
+  );
+};
 
 const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";
