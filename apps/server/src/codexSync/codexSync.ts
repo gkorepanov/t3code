@@ -239,8 +239,8 @@ export function resolveImportedThreadTitle(input: {
   readonly firstUserMessage: string | null;
 }): string {
   const candidates = [
-    input.title,
     input.indexTitle,
+    input.title,
     input.firstUserMessage
       ? normalizeImportedUserText(input.firstUserMessage)
       : input.firstUserMessage,
