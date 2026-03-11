@@ -78,6 +78,7 @@ import {
   type ChatMessage,
   type TurnDiffSummary,
 } from "../types";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
@@ -263,6 +264,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     select: (params) => parseDiffRouteSearch(params),
   });
   const { resolvedTheme } = useTheme();
+  const isCoarsePointer = useMediaQuery("(pointer: coarse)");
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
   const composerDraft = useComposerThreadDraft(threadId);
@@ -3504,7 +3506,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     }
 
-    if (key === "Enter" && !event.shiftKey) {
+    if (key === "Enter" && !event.shiftKey && !isCoarsePointer) {
       void onSend();
       return true;
     }
