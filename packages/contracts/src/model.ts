@@ -88,6 +88,15 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
   },
 };
 
+export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
+  codex: "xhigh",
+  claudeAgent: "high",
+} as const satisfies Record<ProviderKind, ProviderReasoningEffort>;
+
+export const DEFAULT_FAST_MODE_BY_PROVIDER = {
+  codex: true,
+  claudeAgent: false,
+} as const satisfies Record<ProviderKind, boolean>;
 // ── Provider display names ────────────────────────────────────────────
 
 export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {

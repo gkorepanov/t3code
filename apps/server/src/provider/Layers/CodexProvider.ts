@@ -41,8 +41,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
-        { value: "xhigh", label: "Extra High" },
-        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High", isDefault: true },
+        { value: "high", label: "High" },
         { value: "medium", label: "Medium" },
         { value: "low", label: "Low" },
       ],
@@ -58,8 +58,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
-        { value: "xhigh", label: "Extra High" },
-        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High", isDefault: true },
+        { value: "high", label: "High" },
         { value: "medium", label: "Medium" },
         { value: "low", label: "Low" },
       ],
@@ -75,8 +75,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
-        { value: "xhigh", label: "Extra High" },
-        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High", isDefault: true },
+        { value: "high", label: "High" },
         { value: "medium", label: "Medium" },
         { value: "low", label: "Low" },
       ],
@@ -92,8 +92,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
-        { value: "xhigh", label: "Extra High" },
-        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High", isDefault: true },
+        { value: "high", label: "High" },
         { value: "medium", label: "Medium" },
         { value: "low", label: "Low" },
       ],
@@ -109,8 +109,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
-        { value: "xhigh", label: "Extra High" },
-        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High", isDefault: true },
+        { value: "high", label: "High" },
         { value: "medium", label: "Medium" },
         { value: "low", label: "Low" },
       ],
@@ -126,8 +126,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
-        { value: "xhigh", label: "Extra High" },
-        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High", isDefault: true },
+        { value: "high", label: "High" },
         { value: "medium", label: "Medium" },
         { value: "low", label: "Low" },
       ],

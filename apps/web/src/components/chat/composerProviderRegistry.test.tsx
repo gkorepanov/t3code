@@ -9,8 +9,8 @@ const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
-        { value: "xhigh", label: "Extra High" },
-        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High", isDefault: true },
+        { value: "high", label: "High" },
         { value: "medium", label: "Medium" },
         { value: "low", label: "Low" },
       ],
@@ -83,9 +83,10 @@ describe("getComposerProviderState", () => {
 
     expect(state).toEqual({
       provider: "codex",
-      promptEffort: "high",
+      promptEffort: "xhigh",
       modelOptionsForDispatch: {
-        reasoningEffort: "high",
+        reasoningEffort: "xhigh",
+        fastMode: true,
       },
     });
   });
@@ -129,15 +130,15 @@ describe("getComposerProviderState", () => {
 
     expect(state).toEqual({
       provider: "codex",
-      promptEffort: "high",
+      promptEffort: "xhigh",
       modelOptionsForDispatch: {
-        reasoningEffort: "high",
+        reasoningEffort: "xhigh",
         fastMode: true,
       },
     });
   });
 
-  it("preserves codex default effort explicitly in dispatch options", () => {
+  it("preserves explicit codex overrides in dispatch while keeping the selected effort label", () => {
     const state = getComposerProviderState({
       provider: "codex",
       model: "gpt-5.4",
@@ -156,6 +157,7 @@ describe("getComposerProviderState", () => {
       promptEffort: "high",
       modelOptionsForDispatch: {
         reasoningEffort: "high",
+        fastMode: false,
       },
     });
   });

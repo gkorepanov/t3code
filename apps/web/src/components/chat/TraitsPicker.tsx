@@ -1,6 +1,7 @@
 import {
   type ClaudeModelOptions,
   type CodexModelOptions,
+  DEFAULT_FAST_MODE_BY_PROVIDER,
   type ProviderKind,
   type ProviderModelOptions,
   type ServerProviderModel,
@@ -102,8 +103,10 @@ function getSelectedTraits(
 
   // Fast mode
   const fastModeEnabled =
-    caps.supportsFastMode &&
-    (modelOptions as { fastMode?: boolean } | undefined)?.fastMode === true;
+    caps.supportsFastMode
+      ? ((modelOptions as { fastMode?: boolean } | undefined)?.fastMode ??
+        DEFAULT_FAST_MODE_BY_PROVIDER[provider])
+      : null;
 
   // Context window
   const contextWindowOptions = caps.contextWindowOptions;
