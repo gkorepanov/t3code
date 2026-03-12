@@ -122,6 +122,7 @@ function SettingsRouteView() {
   >({});
 
   const codexBinaryPath = settings.codexBinaryPath;
+  const browserFileLinkPrefix = settings.browserFileLinkPrefix;
   const codexHomePath = settings.codexHomePath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
 
@@ -526,6 +527,57 @@ function SettingsRouteView() {
                     </div>
                   );
                 })}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">Link opening</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Rewrite plain clicks on markdown file links to a custom browser URI.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <label htmlFor="browser-file-link-prefix" className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">
+                    Browser file-link prefix
+                  </span>
+                  <Input
+                    id="browser-file-link-prefix"
+                    value={browserFileLinkPrefix}
+                    onChange={(event) =>
+                      updateSettings({ browserFileLinkPrefix: event.target.value })
+                    }
+                    placeholder="vscode://vscode-remote/ssh-remote+wf-gk/"
+                    spellCheck={false}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Plain click opens <code>prefix + path</code>; links without an explicit line
+                    anchor append <code>:0</code>. Modified clicks keep the original browser URL.
+                  </span>
+                </label>
+
+                <div className="flex flex-col gap-3 text-xs text-muted-foreground sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p>Current prefix</p>
+                    <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                      {browserFileLinkPrefix || "Disabled"}
+                    </p>
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    className="self-start"
+                    onClick={() =>
+                      updateSettings({
+                        browserFileLinkPrefix: defaults.browserFileLinkPrefix,
+                      })
+                    }
+                  >
+                    Reset link prefix
+                  </Button>
+                </div>
               </div>
             </section>
 
