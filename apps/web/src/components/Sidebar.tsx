@@ -86,6 +86,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -362,6 +363,7 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const markThreadUnread = useStore((store) => store.markThreadUnread);
@@ -382,7 +384,7 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const { settings: appSettings, updateSettings } = useAppSettings();
-  const { handleNewThread } = useHandleNewThread();
+  const { handleNewThread: baseHandleNewThread } = useHandleNewThread();
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
@@ -492,6 +494,33 @@ export default function Sidebar() {
     });
   }, []);
 
+  const closeMobileSidebar = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+
+  const navigateToThread = useCallback(
+    async (threadId: ThreadId) => {
+      await navigate({
+        to: "/$threadId",
+        params: { threadId },
+      });
+      closeMobileSidebar();
+    },
+    [closeMobileSidebar, navigate],
+  );
+
+  const handleNewThread = useCallback(
+    async (
+      projectId: ProjectId,
+      options?: Parameters<typeof baseHandleNewThread>[1],
+    ): Promise<void> => {
+      await baseHandleNewThread(projectId, options);
+      closeMobileSidebar();
+    },
+    [baseHandleNewThread, closeMobileSidebar],
+  );
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
       const latestThread = sortThreadsForSidebar(
@@ -500,12 +529,9 @@ export default function Sidebar() {
       )[0];
       if (!latestThread) return;
 
-      void navigate({
-        to: "/$threadId",
-        params: { threadId: latestThread.id },
-      });
+      void navigateToThread(latestThread.id);
     },
-    [appSettings.sidebarThreadSortOrder, navigate, threads],
+    [appSettings.sidebarThreadSortOrder, navigateToThread, threads],
   );
 
   const addProjectFromPath = useCallback(
@@ -1008,14 +1034,11 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-      });
+      void navigateToThread(threadId);
     },
     [
       clearSelection,
-      navigate,
+      navigateToThread,
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
@@ -1228,10 +1251,7 @@ export default function Sidebar() {
                 clearSelection();
               }
               setSelectionAnchor(thread.id);
-              void navigate({
-                to: "/$threadId",
-                params: { threadId: thread.id },
-              });
+              void navigateToThread(thread.id);
             }}
             onContextMenu={(event) => {
               event.preventDefault();
