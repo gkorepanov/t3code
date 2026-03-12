@@ -231,16 +231,16 @@ describe("applyClaudePromptEffortPrefix", () => {
 describe("normalizeCodexModelOptions", () => {
   it("drops default-only codex options", () => {
     expect(
-      normalizeCodexModelOptions("gpt-5.4", { reasoningEffort: "high", fastMode: false }),
+      normalizeCodexModelOptions("gpt-5.4", { reasoningEffort: "xhigh", fastMode: true }),
     ).toBeUndefined();
   });
 
   it("preserves non-default codex options", () => {
     expect(
-      normalizeCodexModelOptions("gpt-5.4", { reasoningEffort: "xhigh", fastMode: true }),
+      normalizeCodexModelOptions("gpt-5.4", { reasoningEffort: "high", fastMode: false }),
     ).toEqual({
-      reasoningEffort: "xhigh",
-      fastMode: true,
+      reasoningEffort: "high",
+      fastMode: false,
     });
   });
 });

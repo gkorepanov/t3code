@@ -56,8 +56,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       name: "GPT-5.4",
       capabilities: {
         reasoningEffortLevels: [
-          { value: "xhigh", label: "Extra High" },
-          { value: "high", label: "High", isDefault: true },
+          { value: "xhigh", label: "Extra High", isDefault: true },
+          { value: "high", label: "High" },
           { value: "medium", label: "Medium" },
           { value: "low", label: "Low" },
         ],
@@ -71,8 +71,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       name: "GPT-5.4 Mini",
       capabilities: {
         reasoningEffortLevels: [
-          { value: "xhigh", label: "Extra High" },
-          { value: "high", label: "High", isDefault: true },
+          { value: "xhigh", label: "Extra High", isDefault: true },
+          { value: "high", label: "High" },
           { value: "medium", label: "Medium" },
           { value: "low", label: "Low" },
         ],
@@ -86,8 +86,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       name: "GPT-5.3 Codex",
       capabilities: {
         reasoningEffortLevels: [
-          { value: "xhigh", label: "Extra High" },
-          { value: "high", label: "High", isDefault: true },
+          { value: "xhigh", label: "Extra High", isDefault: true },
+          { value: "high", label: "High" },
           { value: "medium", label: "Medium" },
           { value: "low", label: "Low" },
         ],
@@ -101,8 +101,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       name: "GPT-5.3 Codex Spark",
       capabilities: {
         reasoningEffortLevels: [
-          { value: "xhigh", label: "Extra High" },
-          { value: "high", label: "High", isDefault: true },
+          { value: "xhigh", label: "Extra High", isDefault: true },
+          { value: "high", label: "High" },
           { value: "medium", label: "Medium" },
           { value: "low", label: "Low" },
         ],
@@ -116,8 +116,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       name: "GPT-5.2 Codex",
       capabilities: {
         reasoningEffortLevels: [
-          { value: "xhigh", label: "Extra High" },
-          { value: "high", label: "High", isDefault: true },
+          { value: "xhigh", label: "Extra High", isDefault: true },
+          { value: "high", label: "High" },
           { value: "medium", label: "Medium" },
           { value: "low", label: "Low" },
         ],
@@ -131,8 +131,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       name: "GPT-5.2",
       capabilities: {
         reasoningEffortLevels: [
-          { value: "xhigh", label: "Extra High" },
-          { value: "high", label: "High", isDefault: true },
+          { value: "xhigh", label: "Extra High", isDefault: true },
+          { value: "high", label: "High" },
           { value: "medium", label: "Medium" },
           { value: "low", label: "Low" },
         ],
@@ -238,6 +238,16 @@ export const MODEL_CAPABILITIES_INDEX = Object.fromEntries(
     Object.fromEntries(models.map((m) => [m.slug, m.capabilities])),
   ]),
 ) as unknown as Record<ProviderKind, Record<string, ModelCapabilities>>;
+
+export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
+  codex: "xhigh",
+  claudeAgent: "high",
+} as const satisfies Record<ProviderKind, ProviderReasoningEffort>;
+
+export const DEFAULT_FAST_MODE_BY_PROVIDER = {
+  codex: true,
+  claudeAgent: false,
+} as const satisfies Record<ProviderKind, boolean>;
 
 // ── Provider display names ────────────────────────────────────────────
 

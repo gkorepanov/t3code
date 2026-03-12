@@ -12,8 +12,11 @@ describe("getComposerProviderState", () => {
 
     expect(state).toEqual({
       provider: "codex",
-      promptEffort: "high",
-      modelOptionsForDispatch: undefined,
+      promptEffort: "xhigh",
+      modelOptionsForDispatch: {
+        reasoningEffort: "xhigh",
+        fastMode: true,
+      },
     });
   });
 
@@ -54,14 +57,15 @@ describe("getComposerProviderState", () => {
 
     expect(state).toEqual({
       provider: "codex",
-      promptEffort: "high",
+      promptEffort: "xhigh",
       modelOptionsForDispatch: {
+        reasoningEffort: "xhigh",
         fastMode: true,
       },
     });
   });
 
-  it("drops explicit codex default/off overrides from dispatch while keeping the selected effort label", () => {
+  it("preserves explicit codex overrides in dispatch while keeping the selected effort label", () => {
     const state = getComposerProviderState({
       provider: "codex",
       model: "gpt-5.4",
@@ -77,7 +81,10 @@ describe("getComposerProviderState", () => {
     expect(state).toEqual({
       provider: "codex",
       promptEffort: "high",
-      modelOptionsForDispatch: undefined,
+      modelOptionsForDispatch: {
+        reasoningEffort: "high",
+        fastMode: false,
+      },
     });
   });
 

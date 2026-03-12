@@ -1,4 +1,6 @@
 import {
+  DEFAULT_FAST_MODE_BY_PROVIDER,
+  DEFAULT_REASONING_EFFORT_BY_PROVIDER,
   type ModelSlug,
   type ProviderKind,
   type ProviderModelOptions,
@@ -102,7 +104,22 @@ function getProviderStateFromCapabilities(
 
 const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
   codex: {
-    getState: (input) => getProviderStateFromCapabilities(input),
+    getState: (input) => {
+      const baseState = getProviderStateFromCapabilities(input);
+      const promptEffort =
+        trimOrNull(input.modelOptions?.codex?.reasoningEffort) ??
+        DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex;
+      const fastMode =
+        input.modelOptions?.codex?.fastMode ?? DEFAULT_FAST_MODE_BY_PROVIDER.codex;
+      return {
+        ...baseState,
+        promptEffort,
+        modelOptionsForDispatch: {
+          reasoningEffort: promptEffort,
+          fastMode,
+        },
+      };
+    },
     renderTraitsMenuContent: ({ threadId, model, modelOptions, prompt, onPromptChange }) => (
       <TraitsMenuContent
         provider="codex"

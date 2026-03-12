@@ -1,5 +1,7 @@
 import {
+  DEFAULT_FAST_MODE_BY_PROVIDER,
   DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_REASONING_EFFORT_BY_PROVIDER,
   MODEL_CAPABILITIES_INDEX,
   MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
@@ -150,12 +152,16 @@ export function normalizeCodexModelOptions(
   modelOptions: CodexModelOptions | null | undefined,
 ): CodexModelOptions | undefined {
   const caps = getModelCapabilities("codex", model);
-  const defaultReasoningEffort = getDefaultEffort(caps) as CodexReasoningEffort;
+  const defaultReasoningEffort =
+    (getDefaultEffort(caps) as CodexReasoningEffort | null) ??
+    DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex;
   const reasoningEffort = trimOrNull(modelOptions?.reasoningEffort) ?? defaultReasoningEffort;
-  const fastModeEnabled = modelOptions?.fastMode === true;
+  const defaultFastMode = DEFAULT_FAST_MODE_BY_PROVIDER.codex;
+  const fastModeEnabled =
+    modelOptions?.fastMode === undefined ? defaultFastMode : modelOptions.fastMode;
   const nextOptions: CodexModelOptions = {
     ...(reasoningEffort !== defaultReasoningEffort ? { reasoningEffort } : {}),
-    ...(fastModeEnabled ? { fastMode: true } : {}),
+    ...(fastModeEnabled !== defaultFastMode ? { fastMode: fastModeEnabled } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
