@@ -348,17 +348,17 @@ describe("composerDraftStore codex fast mode", () => {
     });
   });
 
-  it("stores codex fast mode in the draft", () => {
+  it("stores explicit codex fast mode overrides in the draft", () => {
     const store = useComposerDraftStore.getState();
-    store.setCodexFastMode(threadId, true);
+    store.setCodexFastMode(threadId, false);
 
-    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.codexFastMode).toBe(true);
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.codexFastMode).toBe(false);
   });
 
   it("clears codex fast mode when reset to the default", () => {
     const store = useComposerDraftStore.getState();
-    store.setCodexFastMode(threadId, true);
     store.setCodexFastMode(threadId, false);
+    store.setCodexFastMode(threadId, true);
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
   });

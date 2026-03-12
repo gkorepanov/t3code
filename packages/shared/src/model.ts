@@ -1,5 +1,6 @@
 import {
   CODEX_REASONING_EFFORT_OPTIONS,
+  DEFAULT_REASONING_EFFORT_BY_PROVIDER,
   DEFAULT_MODEL_BY_PROVIDER,
   MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
@@ -72,7 +73,7 @@ export function getDefaultReasoningEffort(provider: ProviderKind): CodexReasonin
 export function getDefaultReasoningEffort(
   provider: ProviderKind = "codex",
 ): CodexReasoningEffort | null {
-  return provider === "codex" ? "high" : null;
+  return DEFAULT_REASONING_EFFORT_BY_PROVIDER[provider];
 }
 
 export { CODEX_REASONING_EFFORT_OPTIONS };
