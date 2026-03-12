@@ -17,12 +17,14 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openInPreferredEditor } from "../editorPreferences";
+import { useSettings } from "../hooks/useSettings";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
-import { resolveMarkdownFileLinkTarget } from "../markdown-links";
+import { buildMarkdownRemoteEditorHref, resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import { shouldHandleMarkdownFileLinkClick } from "./chatMarkdownLinkBehavior";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -236,12 +238,14 @@ function SuspenseShikiCodeBlock({
 }
 
 function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+  const browserFileLinkPrefix = useSettings((settings) => settings.browserFileLinkPrefix);
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
         const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
+        const remoteEditorHref = buildMarkdownRemoteEditorHref(targetPath, browserFileLinkPrefix);
         if (!targetPath) {
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
@@ -251,6 +255,13 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
             {...props}
             href={href}
             onClick={(event) => {
+              if (!shouldHandleMarkdownFileLinkClick(event)) return;
+              if (remoteEditorHref) {
+                event.preventDefault();
+                event.stopPropagation();
+                window.location.assign(remoteEditorHref);
+                return;
+              }
               event.preventDefault();
               event.stopPropagation();
               const api = readNativeApi();
@@ -285,7 +296,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [browserFileLinkPrefix, cwd, diffThemeName, isStreaming],
   );
 
   return (
