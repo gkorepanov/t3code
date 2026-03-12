@@ -101,6 +101,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
@@ -320,6 +321,7 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const markThreadUnread = useStore((store) => store.markThreadUnread);
@@ -338,7 +340,7 @@ export default function Sidebar() {
   const isOnSettings = pathname.startsWith("/settings");
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
-  const { handleNewThread } = useHandleNewThread();
+  const { handleNewThread: baseHandleNewThread } = useHandleNewThread();
   const { archiveThread, deleteThread } = useThreadActions();
   const routeThreadId = useParams({
     strict: false,
@@ -479,7 +481,22 @@ export default function Sidebar() {
     },
     [archiveThread],
   );
+  const closeMobileSidebar = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
 
+  const handleNewThread = useCallback(
+    async (
+      projectId: ProjectId,
+      options?: Parameters<typeof baseHandleNewThread>[1],
+    ): Promise<void> => {
+      await baseHandleNewThread(projectId, options);
+      closeMobileSidebar();
+    },
+    [baseHandleNewThread, closeMobileSidebar],
+  );
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
       const latestThread = sortThreadsForSidebar(
@@ -488,12 +505,9 @@ export default function Sidebar() {
       )[0];
       if (!latestThread) return;
 
-      void navigate({
-        to: "/$threadId",
-        params: { threadId: latestThread.id },
-      });
+      void navigateToThread(latestThread.id);
     },
-    [appSettings.sidebarThreadSortOrder, navigate, threads],
+    [appSettings.sidebarThreadSortOrder, navigateToThread, threads],
   );
 
   const addProjectFromPath = useCallback(
@@ -985,14 +999,11 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-      });
+      void navigateToThread(threadId);
     },
     [
       clearSelection,
-      navigate,
+      navigateToThread,
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
@@ -1009,9 +1020,9 @@ export default function Sidebar() {
       void navigate({
         to: "/$threadId",
         params: { threadId },
-      });
+      }).then(() => closeMobileSidebar());
     },
-    [clearSelection, navigate, selectedThreadIds.size, setSelectionAnchor],
+    [clearSelection, closeMobileSidebar, navigate, selectedThreadIds.size, setSelectionAnchor],
   );
 
   const handleProjectContextMenu = useCallback(
@@ -1404,7 +1415,7 @@ export default function Sidebar() {
             onKeyDown={(event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
-              navigateToThread(thread.id);
+              void navigateToThread(thread.id);
             }}
             onContextMenu={(event) => {
               event.preventDefault();
