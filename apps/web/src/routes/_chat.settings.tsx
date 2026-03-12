@@ -238,6 +238,7 @@ function SettingsRouteView() {
   const [showAllCustomModels, setShowAllCustomModels] = useState(false);
 
   const codexBinaryPath = settings.codexBinaryPath;
+  const browserFileLinkPrefix = settings.browserFileLinkPrefix;
   const codexHomePath = settings.codexHomePath;
   const claudeBinaryPath = settings.claudeBinaryPath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
@@ -276,6 +277,9 @@ function SettingsRouteView() {
   const changedSettingLabels = [
     ...(theme !== "system" ? ["Theme"] : []),
     ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
+    ...(settings.browserFileLinkPrefix !== defaults.browserFileLinkPrefix
+      ? ["Link opening"]
+      : []),
     ...(settings.diffWordWrap !== defaults.diffWordWrap ? ["Diff line wrapping"] : []),
     ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
       ? ["Assistant output"]
@@ -692,6 +696,55 @@ function SettingsRouteView() {
                   />
                 }
               />
+            </SettingsSection>
+
+            <SettingsSection title="Links">
+              <SettingsRow
+                title="Browser file links"
+                description="Rewrite plain clicks on markdown file links to a custom browser URI."
+                resetAction={
+                  settings.browserFileLinkPrefix !== defaults.browserFileLinkPrefix ? (
+                    <SettingResetButton
+                      label="browser file links"
+                      onClick={() =>
+                        updateSettings({
+                          browserFileLinkPrefix: defaults.browserFileLinkPrefix,
+                        })
+                      }
+                    />
+                  ) : null
+                }
+              >
+                <div className="mt-4 border-t border-border pt-4">
+                  <label htmlFor="browser-file-link-prefix" className="block space-y-1">
+                    <span className="text-xs font-medium text-foreground">
+                      Browser file-link prefix
+                    </span>
+                    <Input
+                      id="browser-file-link-prefix"
+                      value={browserFileLinkPrefix}
+                      onChange={(event) =>
+                        updateSettings({ browserFileLinkPrefix: event.target.value })
+                      }
+                      placeholder="vscode://vscode-remote/ssh-remote+wf-gk/"
+                      spellCheck={false}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      Plain click opens <code>prefix + path</code>; links without an explicit line
+                      anchor append <code>:0</code>. Modified clicks keep the original browser URL.
+                    </span>
+                  </label>
+
+                  <div className="mt-3 flex flex-col gap-3 text-xs text-muted-foreground sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <p>Current prefix</p>
+                      <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                        {browserFileLinkPrefix || "Disabled"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </SettingsRow>
             </SettingsSection>
 
             <SettingsSection title="Models">

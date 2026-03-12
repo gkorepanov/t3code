@@ -132,3 +132,20 @@ export function resolveMarkdownFileLinkTarget(
   if (!cwd) return null;
   return resolvePathLinkTarget(pathWithPosition, cwd);
 }
+
+export function buildMarkdownRemoteEditorHref(
+  targetPath: string | null | undefined,
+  prefix: string | undefined,
+): string | null {
+  const normalizedPrefix = prefix?.trim();
+  if (!normalizedPrefix || !targetPath) return null;
+
+  const normalizedTargetPath = POSITION_SUFFIX_PATTERN.test(targetPath)
+    ? targetPath
+    : `${targetPath}:0`;
+  const prefixWithSlash = normalizedPrefix.endsWith("/")
+    ? normalizedPrefix
+    : `${normalizedPrefix}/`;
+  const pathWithoutLeadingSlash = normalizedTargetPath.replace(/^\/+/, "");
+  return `${prefixWithSlash}${encodeURI(pathWithoutLeadingSlash)}`;
+}

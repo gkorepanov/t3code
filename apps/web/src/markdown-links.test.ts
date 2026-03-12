@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveMarkdownFileLinkTarget } from "./markdown-links";
+import { buildMarkdownRemoteEditorHref, resolveMarkdownFileLinkTarget } from "./markdown-links";
 
 describe("resolveMarkdownFileLinkTarget", () => {
   it("resolves absolute posix file paths", () => {
@@ -45,5 +45,34 @@ describe("resolveMarkdownFileLinkTarget", () => {
 
   it("does not treat app routes as file links", () => {
     expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
+  });
+});
+
+describe("buildMarkdownRemoteEditorHref", () => {
+  it("appends :0 for file paths without a line suffix", () => {
+    expect(
+      buildMarkdownRemoteEditorHref(
+        "/home/gkorepanov/project/src/ipc.ts",
+        "vscode://vscode-remote/ssh-remote+wf-gk/",
+      ),
+    ).toBe("vscode://vscode-remote/ssh-remote+wf-gk/home/gkorepanov/project/src/ipc.ts:0");
+  });
+
+  it("preserves existing line and column suffixes", () => {
+    expect(
+      buildMarkdownRemoteEditorHref(
+        "/home/gkorepanov/project/src/ipc.ts:121:7",
+        "vscode://vscode-remote/ssh-remote+wf-gk/",
+      ),
+    ).toBe("vscode://vscode-remote/ssh-remote+wf-gk/home/gkorepanov/project/src/ipc.ts:121:7");
+  });
+
+  it("encodes spaces and tolerates prefixes without a trailing slash", () => {
+    expect(
+      buildMarkdownRemoteEditorHref(
+        "/home/gkorepanov/project/file name.ts",
+        "vscode://vscode-remote/ssh-remote+wf-gk",
+      ),
+    ).toBe("vscode://vscode-remote/ssh-remote+wf-gk/home/gkorepanov/project/file%20name.ts:0");
   });
 });
