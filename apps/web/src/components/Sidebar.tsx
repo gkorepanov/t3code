@@ -80,6 +80,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -265,6 +266,7 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const markThreadUnread = useStore((store) => store.markThreadUnread);
@@ -431,6 +433,23 @@ export default function Sidebar() {
     });
   }, []);
 
+  const closeMobileSidebar = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+
+  const navigateToThread = useCallback(
+    async (threadId: ThreadId) => {
+      await navigate({
+        to: "/$threadId",
+        params: { threadId },
+      });
+      closeMobileSidebar();
+    },
+    [closeMobileSidebar, navigate],
+  );
+
   const handleNewThread = useCallback(
     (
       projectId: ProjectId,
@@ -455,12 +474,10 @@ export default function Sidebar() {
           }
           setProjectDraftThreadId(projectId, storedDraftThread.threadId);
           if (routeThreadId === storedDraftThread.threadId) {
+            closeMobileSidebar();
             return;
           }
-          await navigate({
-            to: "/$threadId",
-            params: { threadId: storedDraftThread.threadId },
-          });
+          await navigateToThread(storedDraftThread.threadId);
         })();
       }
       clearProjectDraftThreadId(projectId);
@@ -475,6 +492,7 @@ export default function Sidebar() {
           });
         }
         setProjectDraftThreadId(projectId, routeThreadId);
+        closeMobileSidebar();
         return Promise.resolve();
       }
       const threadId = newThreadId();
@@ -488,17 +506,15 @@ export default function Sidebar() {
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
 
-        await navigate({
-          to: "/$threadId",
-          params: { threadId },
-        });
+        await navigateToThread(threadId);
       })();
     },
     [
+      closeMobileSidebar,
       clearProjectDraftThreadId,
       getDraftThreadByProjectId,
-      navigate,
       getDraftThread,
+      navigateToThread,
       routeThreadId,
       setDraftThreadContext,
       setProjectDraftThreadId,
@@ -952,14 +968,11 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-      });
+      void navigateToThread(threadId);
     },
     [
       clearSelection,
-      navigate,
+      navigateToThread,
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
