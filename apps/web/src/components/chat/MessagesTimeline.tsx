@@ -1,8 +1,10 @@
 import { type MessageId, type TurnId } from "@t3tools/contracts";
 import {
+  forwardRef,
   memo,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -41,7 +43,12 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { computeMessageDurationStart, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
+import {
+  computeMessageDurationStart,
+  findAdjacentRenderedMessageRowIndex,
+  normalizeCompactToolLabel,
+  type RenderedTimelineMessageRow,
+} from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import {
   deriveDisplayedUserMessageState,
@@ -83,29 +90,37 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
 }
 
-export const MessagesTimeline = memo(function MessagesTimeline({
-  hasMessages,
-  isWorking,
-  activeTurnInProgress,
-  activeTurnStartedAt,
-  scrollContainer,
-  timelineEntries,
-  completionDividerBeforeEntryId,
-  completionSummary,
-  turnDiffSummaryByAssistantMessageId,
-  nowIso,
-  expandedWorkGroups,
-  onToggleWorkGroup,
-  onOpenTurnDiff,
-  revertTurnCountByUserMessageId,
-  onRevertUserMessage,
-  isRevertingCheckpoint,
-  onImageExpand,
-  markdownCwd,
-  resolvedTheme,
-  timestampFormat,
-  workspaceRoot,
-}: MessagesTimelineProps) {
+export interface MessagesTimelineHandle {
+  navigateMessage: (direction: -1 | 1) => boolean;
+}
+
+export const MessagesTimeline = memo(
+  forwardRef<MessagesTimelineHandle, MessagesTimelineProps>(function MessagesTimeline(
+    {
+      hasMessages,
+      isWorking,
+      activeTurnInProgress,
+      activeTurnStartedAt,
+      scrollContainer,
+      timelineEntries,
+      completionDividerBeforeEntryId,
+      completionSummary,
+      turnDiffSummaryByAssistantMessageId,
+      nowIso,
+      expandedWorkGroups,
+      onToggleWorkGroup,
+      onOpenTurnDiff,
+      revertTurnCountByUserMessageId,
+      onRevertUserMessage,
+      isRevertingCheckpoint,
+      onImageExpand,
+      markdownCwd,
+      resolvedTheme,
+      timestampFormat,
+      workspaceRoot,
+    }: MessagesTimelineProps,
+    forwardedRef,
+  ) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
 
@@ -303,12 +318,93 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }));
   }, []);
 
-  const renderRowContent = (row: TimelineRow) => (
+  const getRenderedMessageRows = useCallback((): RenderedTimelineMessageRow[] => {
+    const timelineRoot = timelineRootRef.current;
+    if (!timelineRoot || !scrollContainer) {
+      return [];
+    }
+    const scrollContainerRect = scrollContainer.getBoundingClientRect();
+    return Array.from(
+      timelineRoot.querySelectorAll<HTMLElement>("[data-message-id][data-row-index]"),
+    )
+      .map((element) => {
+        const rowIndex = Number(element.dataset.rowIndex);
+        if (!Number.isInteger(rowIndex)) {
+          return null;
+        }
+        return {
+          rowIndex,
+          top:
+            scrollContainer.scrollTop +
+            element.getBoundingClientRect().top -
+            scrollContainerRect.top,
+        };
+      })
+      .filter((row): row is RenderedTimelineMessageRow => row !== null)
+      .toSorted((left, right) => left.top - right.top);
+  }, [scrollContainer]);
+
+  const scrollToMessageRowStart = useCallback(
+    (rowIndex: number): boolean => {
+      const timelineRoot = timelineRootRef.current;
+      if (!timelineRoot || !scrollContainer) {
+        return false;
+      }
+      const messageRow = timelineRoot.querySelector<HTMLElement>(
+        `[data-message-id][data-row-index="${rowIndex}"]`,
+      );
+      if (messageRow) {
+        const scrollContainerRect = scrollContainer.getBoundingClientRect();
+        const top =
+          scrollContainer.scrollTop +
+          messageRow.getBoundingClientRect().top -
+          scrollContainerRect.top;
+        scrollContainer.scrollTo({ top: Math.max(0, top) });
+        return true;
+      }
+      if (rowIndex < virtualizedRowCount) {
+        rowVirtualizer.scrollToIndex(rowIndex, { align: "start" });
+        return true;
+      }
+      return false;
+    },
+    [rowVirtualizer, scrollContainer, virtualizedRowCount],
+  );
+
+  const navigateMessage = useCallback(
+    (direction: -1 | 1): boolean => {
+      if (!scrollContainer) {
+        return false;
+      }
+      const renderedMessageRows = getRenderedMessageRows();
+      const targetRowIndex = findAdjacentRenderedMessageRowIndex(
+        renderedMessageRows,
+        scrollContainer.scrollTop,
+        direction,
+      );
+      if (targetRowIndex === null) {
+        return false;
+      }
+      return scrollToMessageRowStart(targetRowIndex);
+    },
+    [getRenderedMessageRows, scrollContainer, scrollToMessageRowStart],
+  );
+
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      navigateMessage,
+    }),
+    [navigateMessage],
+  );
+
+  const renderRowContent = (row: TimelineRow, rowIndex: number) => (
     <div
       className="pb-4"
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
+      data-row-index={row.kind === "message" ? rowIndex : undefined}
     >
       {row.kind === "work" &&
         (() => {
@@ -588,19 +684,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 className="absolute left-0 top-0 w-full"
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
-                {renderRowContent(row)}
+                {renderRowContent(row, virtualRow.index)}
               </div>
             );
           })}
         </div>
       )}
 
-      {nonVirtualizedRows.map((row) => (
-        <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
+      {nonVirtualizedRows.map((row, index) => (
+        <div key={`non-virtual-row:${row.id}`}>
+          {renderRowContent(row, virtualizedRowCount + index)}
+        </div>
       ))}
     </div>
   );
-});
+  }),
+);
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];

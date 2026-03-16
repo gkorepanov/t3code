@@ -808,6 +808,17 @@ async function measureUserRow(options: {
   return { measuredRowHeightPx, timelineWidthMeasuredPx, renderedInVirtualizedRegion };
 }
 
+function messageRowScrollTop(scrollContainer: HTMLElement, messageId: MessageId): number {
+  const messageRow = document.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+  if (!(messageRow instanceof HTMLElement)) {
+    throw new Error(`Unable to locate message row ${messageId}.`);
+  }
+  const scrollContainerRect = scrollContainer.getBoundingClientRect();
+  return (
+    scrollContainer.scrollTop + messageRow.getBoundingClientRect().top - scrollContainerRect.top
+  );
+}
+
 async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
@@ -1683,6 +1694,114 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(draft?.terminalContexts.map((context) => context.id)).toEqual(["ctx-added"]);
           expect(document.body.textContent).toContain(addedLabel);
           expect(document.body.textContent).not.toContain(removedLabel);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("navigates between message starts with ArrowUp and ArrowDown", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-message-nav" as MessageId,
+        targetText: "message navigation target",
+      }),
+    });
+
+    try {
+      const scrollContainer = await waitForElement(
+        () => document.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
+        "Unable to find ChatView message scroll container.",
+      );
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      const firstMessageId = "msg-user-0" as MessageId;
+      const secondMessageId = "msg-assistant-0" as MessageId;
+      const thirdMessageId = "msg-user-1" as MessageId;
+
+      const firstMessage = await waitForElement(
+        () => document.querySelector<HTMLElement>(`[data-message-id="${firstMessageId}"]`),
+        "Unable to find the first timeline message.",
+      );
+      await waitForElement(
+        () => document.querySelector<HTMLElement>(`[data-message-id="${secondMessageId}"]`),
+        "Unable to find the second timeline message.",
+      );
+      await waitForElement(
+        () => document.querySelector<HTMLElement>(`[data-message-id="${thirdMessageId}"]`),
+        "Unable to find the third timeline message.",
+      );
+
+      const firstTop = messageRowScrollTop(scrollContainer, firstMessageId);
+      const secondTop = messageRowScrollTop(scrollContainer, secondMessageId);
+      const thirdTop = messageRowScrollTop(scrollContainer, thirdMessageId);
+
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.blur();
+      firstMessage.click();
+      await waitForLayout();
+
+      scrollContainer.scrollTop = firstTop;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(
+        () => {
+          expect(Math.abs(scrollContainer.scrollTop - secondTop)).toBeLessThanOrEqual(2);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(
+        () => {
+          expect(Math.abs(scrollContainer.scrollTop - thirdTop)).toBeLessThanOrEqual(2);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(
+        () => {
+          expect(Math.abs(scrollContainer.scrollTop - secondTop)).toBeLessThanOrEqual(2);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(
+        () => {
+          expect(Math.abs(scrollContainer.scrollTop - firstTop)).toBeLessThanOrEqual(2);
         },
         { timeout: 8_000, interval: 16 },
       );

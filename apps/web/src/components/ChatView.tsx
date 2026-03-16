@@ -149,7 +149,7 @@ import { shouldUseCompactComposerFooter } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
-import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { MessagesTimeline, type MessagesTimelineHandle } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -380,6 +380,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const [messagesScrollElement, setMessagesScrollElement] = useState<HTMLDivElement | null>(null);
+  const messagesTimelineRef = useRef<MessagesTimelineHandle | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const lastKnownScrollTopRef = useRef(0);
   const isPointerScrollActiveRef = useRef(false);
@@ -2306,6 +2307,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
     toggleTerminalVisibility,
   ]);
 
+  useEffect(() => {
+    const handler = (event: globalThis.KeyboardEvent) => {
+      if (!activeThreadId || expandedImage) return;
+      if (
+        !shouldHandleTimelineMessageNavigationHotkey({
+          event,
+          messagesScrollContainer: messagesScrollRef.current,
+        })
+      ) {
+        return;
+      }
+      if (!messagesTimelineRef.current?.navigateMessage(event.key === "ArrowUp" ? -1 : 1)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeThreadId, expandedImage]);
+
   const addComposerImages = (files: File[]) => {
     if (!activeThreadId || files.length === 0) return;
 
@@ -3660,6 +3682,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             >
               <MessagesTimeline
                 key={activeThread.id}
+                ref={messagesTimelineRef}
                 hasMessages={timelineEntries.length > 0}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
@@ -4330,5 +4353,79 @@ export default function ChatView({ threadId }: ChatViewProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function shouldHandleTimelineMessageNavigationHotkey(input: {
+  event: KeyboardEvent;
+  messagesScrollContainer: HTMLDivElement | null;
+}): boolean {
+  const { event, messagesScrollContainer } = input;
+  if (!messagesScrollContainer || event.defaultPrevented) {
+    return false;
+  }
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+    return false;
+  }
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return false;
+  }
+  if (isTerminalFocused()) {
+    return false;
+  }
+  const selection = window.getSelection();
+  if (selection && !selection.isCollapsed) {
+    return false;
+  }
+
+  const targetElement =
+    event.target instanceof HTMLElement
+      ? event.target
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+  if (!targetElement) {
+    return true;
+  }
+  if (
+    targetElement.isContentEditable ||
+    targetElement.closest(
+      [
+        "input",
+        "textarea",
+        "select",
+        "[data-chat-composer-form='true']",
+        "[role='textbox']",
+        "[role='combobox']",
+        "[role='listbox']",
+      ].join(", "),
+    )
+  ) {
+    return false;
+  }
+  if (
+    targetElement.closest(
+      [
+        "button",
+        "a[href]",
+        "summary",
+        "[role='button']",
+        "[role='dialog']",
+        "[role='menuitem']",
+        "[role='option']",
+        "[data-slot='dialog-popup']",
+        "[data-slot='menu-popup']",
+        "[data-slot='select-popup']",
+        "[data-slot='popover-popup']",
+        "[data-slot='command-dialog-popup']",
+      ].join(", "),
+    )
+  ) {
+    return false;
+  }
+  return (
+    targetElement === document.body ||
+    targetElement === document.documentElement ||
+    messagesScrollContainer.contains(targetElement)
   );
 }

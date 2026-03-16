@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { computeMessageDurationStart, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
+import {
+  computeMessageDurationStart,
+  findAdjacentRenderedMessageRowIndex,
+  normalizeCompactToolLabel,
+} from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
@@ -141,5 +145,33 @@ describe("normalizeCompactToolLabel", () => {
 
   it("removes trailing completion wording from other labels", () => {
     expect(normalizeCompactToolLabel("Read file completed")).toBe("Read file");
+  });
+});
+
+describe("findAdjacentRenderedMessageRowIndex", () => {
+  const rows = [
+    { rowIndex: 0, top: 24 },
+    { rowIndex: 1, top: 160 },
+    { rowIndex: 2, top: 280 },
+  ] as const;
+
+  it("moves down to the next message start", () => {
+    expect(findAdjacentRenderedMessageRowIndex(rows, 160, 1)).toBe(2);
+  });
+
+  it("moves down to the first message when still above it", () => {
+    expect(findAdjacentRenderedMessageRowIndex(rows, 0, 1)).toBe(0);
+  });
+
+  it("moves up to the current message start when scrolled inside it", () => {
+    expect(findAdjacentRenderedMessageRowIndex(rows, 161, -1)).toBe(1);
+  });
+
+  it("moves up to the previous message when already aligned to a start", () => {
+    expect(findAdjacentRenderedMessageRowIndex(rows, 160, -1)).toBe(0);
+  });
+
+  it("returns null when there is no earlier message to move to", () => {
+    expect(findAdjacentRenderedMessageRowIndex(rows, 24, -1)).toBeNull();
   });
 });
