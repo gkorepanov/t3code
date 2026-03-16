@@ -538,6 +538,8 @@ const worker = setupWorker(
   http.get("*/api/project-favicon", () => new HttpResponse(null, { status: 204 })),
 );
 
+let restorePointerModeMock: (() => void) | null = null;
+
 async function nextFrame(): Promise<void> {
   await new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => resolve());
@@ -548,6 +550,42 @@ async function waitForLayout(): Promise<void> {
   await nextFrame();
   await nextFrame();
   await nextFrame();
+}
+
+function restorePointerMode(): void {
+  restorePointerModeMock?.();
+  restorePointerModeMock = null;
+}
+
+function overrideMediaQueryMatches(source: MediaQueryList, matches: boolean): MediaQueryList {
+  return {
+    matches,
+    media: source.media,
+    onchange: source.onchange,
+    addListener: source.addListener.bind(source),
+    removeListener: source.removeListener.bind(source),
+    addEventListener: source.addEventListener.bind(source),
+    removeEventListener: source.removeEventListener.bind(source),
+    dispatchEvent: source.dispatchEvent.bind(source),
+  };
+}
+
+function mockPointerMode(pointer: "coarse" | "fine"): void {
+  restorePointerMode();
+  const originalMatchMedia = window.matchMedia.bind(window);
+  const spy = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const mediaQueryList = originalMatchMedia(query);
+    if (query === "(pointer: coarse)") {
+      return overrideMediaQueryMatches(mediaQueryList, pointer === "coarse");
+    }
+    if (query === "(pointer: fine)") {
+      return overrideMediaQueryMatches(mediaQueryList, pointer === "fine");
+    }
+    return mediaQueryList;
+  });
+  restorePointerModeMock = () => {
+    spy.mockRestore();
+  };
 }
 
 async function setViewport(viewport: ViewportSpec): Promise<void> {
@@ -860,6 +898,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   beforeEach(async () => {
+    restorePointerMode();
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";
@@ -881,6 +920,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
   afterEach(() => {
     customWsRpcResolver = null;
+    restorePointerMode();
     document.body.innerHTML = "";
   });
 
@@ -1755,6 +1795,51 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
 
       expect(getComputedStyle(stopButton).cursor).toBe("pointer");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps send available on coarse-pointer devices while a turn is running", async () => {
+    mockPointerMode("coarse");
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "follow up while running");
+
+    const mounted = await mountChatView({
+      viewport: TEXT_VIEWPORT_MATRIX[2],
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-send-while-running" as MessageId,
+        targetText: "mobile send while running target",
+        sessionStatus: "running",
+      }),
+    });
+
+    try {
+      const sendButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
+        "Unable to find send button while thread is running on a coarse-pointer device.",
+      );
+      await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Stop generation"]'),
+        "Unable to find stop button while thread is running on a coarse-pointer device.",
+      );
+
+      expect(sendButton.disabled).toBe(false);
+      await sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchedCommandTypes = wsRequests
+            .filter((request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand)
+            .map((request) => (request.command as { type?: string } | undefined)?.type);
+          expect(dispatchedCommandTypes).toContain("thread.turn.start");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const dispatchedCommandTypes = wsRequests
+        .filter((request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand)
+        .map((request) => (request.command as { type?: string } | undefined)?.type);
+      expect(dispatchedCommandTypes).not.toContain("thread.turn.interrupt");
     } finally {
       await mounted.cleanup();
     }

@@ -729,6 +729,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activePendingIsResponding = activePendingUserInput
     ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
+  const showSeparateRunningStopButton =
+    phase === "running" &&
+    isCoarsePointer &&
+    activePendingProgress === null &&
+    pendingUserInputs.length === 0;
+  const showInlineRunningStopButton = phase === "running" && !showSeparateRunningStopButton;
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -3548,6 +3554,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     void onRevertToTurnCount(targetTurnCount);
   };
+  const renderRunningStopButton = () => (
+    <button
+      type="button"
+      className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:scale-105 hover:bg-rose-500 sm:h-8 sm:w-8"
+      onClick={() => void onInterrupt()}
+      aria-label="Stop generation"
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+        <rect x="2" y="2" width="8" height="8" rx="1.5" />
+      </svg>
+    </button>
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -4053,23 +4071,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   : "Next question"}
                             </Button>
                           </div>
-                        ) : phase === "running" ? (
-                          <button
-                            type="button"
-                            className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-                            onClick={() => void onInterrupt()}
-                            aria-label="Stop generation"
-                          >
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 12 12"
-                              fill="currentColor"
-                              aria-hidden="true"
-                            >
-                              <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                            </svg>
-                          </button>
+                        ) : showInlineRunningStopButton ? (
+                          renderRunningStopButton()
                         ) : pendingUserInputs.length === 0 ? (
                           showPlanFollowUpPrompt ? (
                             prompt.trim().length > 0 ? (
@@ -4173,6 +4176,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           )
                         ) : null}
                       </div>
+                      {showSeparateRunningStopButton ? renderRunningStopButton() : null}
                     </div>
                   )}
                 </div>
