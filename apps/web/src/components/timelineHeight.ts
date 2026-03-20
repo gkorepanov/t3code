@@ -1,8 +1,4 @@
-import {
-  DEFAULT_CHAT_FONT_SIZE,
-  getChatFontSizeMetrics,
-  type ChatFontSize,
-} from "../chatFontSize";
+import { DEFAULT_CHAT_FONT_SIZE, getChatFontSizeMetrics, type ChatFontSize } from "../chatFontSize";
 import { deriveDisplayedUserMessageState } from "../lib/terminalContext";
 import { buildInlineTerminalContextText } from "./chat/userMessageTerminalContexts";
 
