@@ -135,4 +135,38 @@ describe("estimateTimelineMessageHeight", () => {
     expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(188);
     expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(122);
   });
+
+  it("scales assistant message estimates with chat font size", () => {
+    const message = {
+      role: "assistant" as const,
+      text: "a".repeat(200),
+    };
+
+    expect(
+      estimateTimelineMessageHeight(message, { timelineWidthPx: 320, chatFontSize: "sm" }),
+    ).toBe(178);
+    expect(
+      estimateTimelineMessageHeight(message, { timelineWidthPx: 320, chatFontSize: "md" }),
+    ).toBe(188);
+    expect(
+      estimateTimelineMessageHeight(message, { timelineWidthPx: 320, chatFontSize: "lg" }),
+    ).toBe(222);
+  });
+
+  it("scales user message estimates with chat font size", () => {
+    const message = {
+      role: "user" as const,
+      text: "a".repeat(100),
+    };
+
+    expect(
+      estimateTimelineMessageHeight(message, { timelineWidthPx: 320, chatFontSize: "sm" }),
+    ).toBe(176);
+    expect(
+      estimateTimelineMessageHeight(message, { timelineWidthPx: 320, chatFontSize: "md" }),
+    ).toBe(184);
+    expect(
+      estimateTimelineMessageHeight(message, { timelineWidthPx: 320, chatFontSize: "lg" }),
+    ).toBe(216);
+  });
 });

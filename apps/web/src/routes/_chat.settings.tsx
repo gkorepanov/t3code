@@ -5,6 +5,7 @@ import { type ReactNode, useCallback, useState } from "react";
 import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { useAppSettings } from "../appSettings";
+import { CHAT_FONT_SIZE_LABELS } from "../chatFontSize";
 import {
   getCustomModelOptionsByProvider,
   getCustomModelsForProvider,
@@ -277,6 +278,7 @@ function SettingsRouteView() {
   const changedSettingLabels = [
     ...(theme !== "system" ? ["Theme"] : []),
     ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
+    ...(settings.chatFontSize !== defaults.chatFontSize ? ["Chat font size"] : []),
     ...(settings.browserFileLinkPrefix !== defaults.browserFileLinkPrefix
       ? ["Link opening"]
       : []),
@@ -565,6 +567,49 @@ function SettingsRouteView() {
                       </SelectItem>
                       <SelectItem hideIndicator value="24-hour">
                         {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+
+              <SettingsRow
+                title="Chat font size"
+                description="Changes only user and assistant message content in the chat timeline."
+                resetAction={
+                  settings.chatFontSize !== defaults.chatFontSize ? (
+                    <SettingResetButton
+                      label="chat font size"
+                      onClick={() =>
+                        updateSettings({
+                          chatFontSize: defaults.chatFontSize,
+                        })
+                      }
+                    />
+                  ) : null
+                }
+                control={
+                  <Select
+                    value={settings.chatFontSize}
+                    onValueChange={(value) => {
+                      if (value !== "sm" && value !== "md" && value !== "lg") return;
+                      updateSettings({
+                        chatFontSize: value,
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-full sm:w-40" aria-label="Chat message font size">
+                      <SelectValue>{CHAT_FONT_SIZE_LABELS[settings.chatFontSize]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      <SelectItem hideIndicator value="sm">
+                        {CHAT_FONT_SIZE_LABELS.sm}
+                      </SelectItem>
+                      <SelectItem hideIndicator value="md">
+                        {CHAT_FONT_SIZE_LABELS.md}
+                      </SelectItem>
+                      <SelectItem hideIndicator value="lg">
+                        {CHAT_FONT_SIZE_LABELS.lg}
                       </SelectItem>
                     </SelectPopup>
                   </Select>

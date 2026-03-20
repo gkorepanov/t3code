@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -37,6 +38,7 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { clamp } from "effect/Number";
+import { getChatFontSizeMetrics, type ChatFontSize } from "../../chatFontSize";
 import { estimateTimelineMessageHeight } from "../timelineHeight";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -77,6 +79,7 @@ interface MessagesTimelineProps {
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   nowIso: string;
+  chatFontSize: ChatFontSize;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -107,6 +110,7 @@ export const MessagesTimeline = memo(
       completionSummary,
       turnDiffSummaryByAssistantMessageId,
       nowIso,
+      chatFontSize,
       expandedWorkGroups,
       onToggleWorkGroup,
       onOpenTurnDiff,
@@ -123,6 +127,11 @@ export const MessagesTimeline = memo(
   ) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
+  const chatFontMetrics = getChatFontSizeMetrics(chatFontSize);
+  const chatMessageTextStyle = {
+    fontSize: `${chatFontMetrics.fontSizePx}px`,
+    lineHeight: `${chatFontMetrics.lineHeightPx}px`,
+  } as const;
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -268,7 +277,7 @@ export const MessagesTimeline = memo(
       if (row.kind === "work") return 112;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
-      return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
+      return estimateTimelineMessageHeight(row.message, { timelineWidthPx, chatFontSize });
     },
     measureElement: measureVirtualElement,
     useAnimationFrameWithResizeObserver: true,
@@ -277,7 +286,7 @@ export const MessagesTimeline = memo(
   useEffect(() => {
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
-  }, [rowVirtualizer, timelineWidthPx]);
+  }, [rowVirtualizer, timelineWidthPx, chatFontSize]);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (_item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
@@ -500,6 +509,7 @@ export const MessagesTimeline = memo(
                   <UserMessageBody
                     text={displayedUserMessage.visibleText}
                     terminalContexts={terminalContexts}
+                    style={chatMessageTextStyle}
                   />
                 )}
                 <div className="mt-1.5 flex items-center justify-end gap-2">
@@ -549,6 +559,7 @@ export const MessagesTimeline = memo(
                   text={messageText}
                   cwd={markdownCwd}
                   isStreaming={Boolean(row.message.streaming)}
+                  chatFontSize={chatFontSize}
                 />
                 {(() => {
                   const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
@@ -779,6 +790,7 @@ const UserMessageTerminalContextInlineLabel = memo(
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
+  style?: CSSProperties;
 }) {
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
@@ -824,7 +836,10 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+          <div
+            className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground"
+            style={props.style}
+          >
             {inlineNodes}
           </div>
         );
@@ -852,7 +867,10 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+      <div
+        className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground"
+        style={props.style}
+      >
         {inlineNodes}
       </div>
     );
@@ -863,7 +881,10 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
+    <pre
+      className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground"
+      style={props.style}
+    >
       {props.text}
     </pre>
   );

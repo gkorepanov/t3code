@@ -5,6 +5,7 @@ import {
   ModelSelection,
   type ProviderStartOptions,
 } from "@t3tools/contracts";
+import { CHAT_FONT_SIZE_OPTIONS, DEFAULT_CHAT_FONT_SIZE } from "./chatFontSize";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { EnvMode } from "./components/BranchToolbar.logic";
 import { normalizeCustomModelSlugs } from "./modelSelection";
@@ -45,6 +46,9 @@ export const AppSettingsSchema = Schema.Struct({
   confirmThreadDelete: Schema.Boolean.pipe(withDefaults(() => true)),
   diffWordWrap: Schema.Boolean.pipe(withDefaults(() => false)),
   enableAssistantStreaming: Schema.Boolean.pipe(withDefaults(() => false)),
+  chatFontSize: Schema.Literals(CHAT_FONT_SIZE_OPTIONS).pipe(
+    withDefaults(() => DEFAULT_CHAT_FONT_SIZE),
+  ),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     withDefaults(() => DEFAULT_SIDEBAR_PROJECT_SORT_ORDER),
   ),
