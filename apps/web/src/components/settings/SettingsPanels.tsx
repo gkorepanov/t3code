@@ -22,6 +22,7 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
+import { CHAT_FONT_SIZE_LABELS } from "../../chatFontSize";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -480,6 +481,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.chatFontSize !== DEFAULT_UNIFIED_SETTINGS.chatFontSize
+        ? ["Chat font size"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -504,6 +508,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     [
       areProviderSettingsDirty,
       settings.browserFileLinkPrefix,
+      settings.chatFontSize,
       isGitWritingModelDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -881,6 +886,48 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Chat font size"
+          description="Changes only user and assistant message content in the chat timeline."
+          resetAction={
+            settings.chatFontSize !== DEFAULT_UNIFIED_SETTINGS.chatFontSize ? (
+              <SettingResetButton
+                label="chat font size"
+                onClick={() =>
+                  updateSettings({
+                    chatFontSize: DEFAULT_UNIFIED_SETTINGS.chatFontSize,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.chatFontSize}
+              onValueChange={(value) => {
+                if (value === "sm" || value === "md" || value === "lg") {
+                  updateSettings({ chatFontSize: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Chat message font size">
+                <SelectValue>{CHAT_FONT_SIZE_LABELS[settings.chatFontSize]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="sm">
+                  {CHAT_FONT_SIZE_LABELS.sm}
+                </SelectItem>
+                <SelectItem hideIndicator value="md">
+                  {CHAT_FONT_SIZE_LABELS.md}
+                </SelectItem>
+                <SelectItem hideIndicator value="lg">
+                  {CHAT_FONT_SIZE_LABELS.lg}
                 </SelectItem>
               </SelectPopup>
             </Select>

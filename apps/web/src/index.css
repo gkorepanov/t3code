@@ -315,7 +315,7 @@ label:has(> select#reasoning-effort) select {
   background: var(--muted);
   padding: 0.1rem 0.35rem;
   color: var(--foreground);
-  font-size: 0.75rem;
+  font-size: 0.86em;
 }
 
 .chat-markdown pre {
@@ -332,7 +332,7 @@ label:has(> select#reasoning-effort) select {
   background: transparent;
   padding: 0;
   line-height: 1.5;
-  font-size: 0.875rem;
+  font-size: 1em;
 }
 
 .chat-markdown .chat-markdown-codeblock {

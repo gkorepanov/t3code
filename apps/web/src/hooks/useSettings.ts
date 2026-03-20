@@ -21,6 +21,7 @@ import {
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import {
   type ClientSettings,
+  ChatFontSize,
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
@@ -204,6 +205,10 @@ export function buildLegacyClientSettingsMigrationPatch(
 
   if (Predicate.isString(legacySettings.browserFileLinkPrefix)) {
     patch.browserFileLinkPrefix = legacySettings.browserFileLinkPrefix;
+  }
+
+  if (Schema.is(ChatFontSize)(legacySettings.chatFontSize)) {
+    patch.chatFontSize = legacySettings.chatFontSize;
   }
 
   if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {
