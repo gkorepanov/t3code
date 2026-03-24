@@ -201,3 +201,15 @@ export function createWsNativeApi(): NativeApi {
   instance = { api, transport };
   return api;
 }
+
+export async function reconnectWsNativeApi(timeoutMs = 3_000): Promise<boolean> {
+  const transport = instance?.transport;
+  if (!transport) {
+    return false;
+  }
+  if (transport.getState() === "open") {
+    return true;
+  }
+  await transport.reconnect(timeoutMs);
+  return true;
+}

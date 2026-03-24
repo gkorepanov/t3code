@@ -253,4 +253,22 @@ describe("WsTransport", () => {
     await expect(requestPromise).rejects.toThrow("WebSocket connection closed.");
     transport.dispose();
   });
+
+  it("reconnects immediately with a fresh socket", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    const reconnectPromise = transport.reconnect(1_000);
+    expect(sockets).toHaveLength(2);
+
+    const secondSocket = getSocket();
+    expect(secondSocket).not.toBe(firstSocket);
+    secondSocket.open();
+
+    await expect(reconnectPromise).resolves.toBeUndefined();
+    expect(transport.getState()).toBe("open");
+
+    transport.dispose();
+  });
 });
