@@ -46,7 +46,6 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
   const screen = await render(
     <CompactComposerControlsMenu
       activePlan={false}
-      interactionMode="default"
       planSidebarOpen={false}
       runtimeMode="approval-required"
       traitsMenuContent={
@@ -59,7 +58,6 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
           onPromptChange={onPromptChange}
         />
       }
-      onToggleInteractionMode={vi.fn()}
       onTogglePlanSidebar={vi.fn()}
       onToggleRuntimeMode={vi.fn()}
     />,
@@ -101,6 +99,25 @@ describe("CompactComposerControlsMenu", () => {
       expect(text).toContain("off");
       expect(text).toContain("on");
     });
+  });
+
+  it("keeps chat plan mode outside the overflow menu", async () => {
+    const mounted = await mountMenu({
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+    });
+
+    try {
+      await page.getByLabelText("More composer controls").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).not.toContain("Mode");
+        expect(text).not.toContain("Chat");
+        expect(text).not.toContain("Plan");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("hides fast mode controls for non-Opus Claude models", async () => {

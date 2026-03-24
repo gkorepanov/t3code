@@ -238,6 +238,33 @@ function formatOutgoingPrompt(params: {
   }
   return params.text;
 }
+
+function InteractionModeToggleButton(props: {
+  compact?: boolean;
+  interactionMode: ProviderInteractionMode;
+  onClick: () => void;
+}) {
+  const label = props.interactionMode === "plan" ? "Plan" : "Chat";
+
+  return (
+    <Button
+      variant="ghost"
+      className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+      size="sm"
+      type="button"
+      onClick={props.onClick}
+      title={
+        props.interactionMode === "plan"
+          ? "Plan mode — click to return to normal chat mode"
+          : "Default mode — click to enter plan mode"
+      }
+    >
+      <BotIcon />
+      <span className={props.compact ? undefined : "sr-only sm:not-sr-only"}>{label}</span>
+    </Button>
+  );
+}
+
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
@@ -3927,18 +3954,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         />
 
                         {isComposerFooterCompact ? (
-                          <CompactComposerControlsMenu
-                            activePlan={Boolean(
-                              activePlan || sidebarProposedPlan || planSidebarOpen,
-                            )}
-                            interactionMode={interactionMode}
-                            planSidebarOpen={planSidebarOpen}
-                            runtimeMode={runtimeMode}
-                            traitsMenuContent={providerTraitsMenuContent}
-                            onToggleInteractionMode={toggleInteractionMode}
-                            onTogglePlanSidebar={togglePlanSidebar}
-                            onToggleRuntimeMode={toggleRuntimeMode}
-                          />
+                          <>
+                            <InteractionModeToggleButton
+                              compact
+                              interactionMode={interactionMode}
+                              onClick={toggleInteractionMode}
+                            />
+                            <CompactComposerControlsMenu
+                              activePlan={Boolean(
+                                activePlan || sidebarProposedPlan || planSidebarOpen,
+                              )}
+                              planSidebarOpen={planSidebarOpen}
+                              runtimeMode={runtimeMode}
+                              traitsMenuContent={providerTraitsMenuContent}
+                              onTogglePlanSidebar={togglePlanSidebar}
+                              onToggleRuntimeMode={toggleRuntimeMode}
+                            />
+                          </>
                         ) : (
                           <>
                             {providerTraitsPicker ? (
@@ -3956,23 +3988,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="mx-0.5 hidden h-4 sm:block"
                             />
 
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
+                            <InteractionModeToggleButton
+                              interactionMode={interactionMode}
                               onClick={toggleInteractionMode}
-                              title={
-                                interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
-                                  : "Default mode — click to enter plan mode"
-                              }
-                            >
-                              <BotIcon />
-                              <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
-                              </span>
-                            </Button>
+                            />
 
                             <Separator
                               orientation="vertical"
