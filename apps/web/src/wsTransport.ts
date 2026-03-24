@@ -17,6 +17,12 @@ interface PendingRequest {
   timeout: ReturnType<typeof setTimeout> | null;
 }
 
+interface OpenWaiter {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
 interface SubscribeOptions {
   readonly replayLatest?: boolean;
 }
@@ -56,6 +62,7 @@ export class WsTransport {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly listeners = new Map<string, Set<(message: WsPush) => void>>();
   private readonly latestPushByChannel = new Map<string, WsPush>();
+  private readonly openWaiters = new Set<OpenWaiter>();
   private readonly outboundQueue: string[] = [];
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -150,6 +157,60 @@ export class WsTransport {
     return this.state;
   }
 
+  waitUntilOpen(timeoutMs = REQUEST_TIMEOUT_MS): Promise<void> {
+    if (this.disposed) {
+      return Promise.reject(new Error("Transport disposed"));
+    }
+    if (this.ws?.readyState === WebSocket.OPEN && this.state === "open") {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const waiter: OpenWaiter = {
+        resolve: () => {
+          clearTimeout(waiter.timeout);
+          this.openWaiters.delete(waiter);
+          resolve();
+        },
+        reject: (error) => {
+          clearTimeout(waiter.timeout);
+          this.openWaiters.delete(waiter);
+          reject(error);
+        },
+        timeout: setTimeout(() => {
+          waiter.reject(new Error("Timed out waiting for WebSocket connection."));
+        }, timeoutMs),
+      };
+
+      this.openWaiters.add(waiter);
+    });
+  }
+
+  reconnect(timeoutMs = REQUEST_TIMEOUT_MS): Promise<void> {
+    if (this.disposed) {
+      return Promise.reject(new Error("Transport disposed"));
+    }
+
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.reconnectAttempt = 0;
+    const previousSocket = this.ws;
+    this.connect("reconnecting");
+
+    if (previousSocket && previousSocket !== this.ws) {
+      try {
+        previousSocket.close();
+      } catch {
+        // Ignore close failures; the new connection is already in flight.
+      }
+    }
+
+    return this.waitUntilOpen(timeoutMs);
+  }
+
   dispose() {
     this.disposed = true;
     this.state = "disposed";
@@ -164,41 +225,50 @@ export class WsTransport {
       pending.reject(new Error("Transport disposed"));
     }
     this.pending.clear();
+    this.rejectOpenWaiters(new Error("Transport disposed"));
     this.outboundQueue.length = 0;
     this.ws?.close();
     this.ws = null;
   }
 
-  private connect() {
+  private connect(state: "connecting" | "reconnecting" = "connecting") {
     if (this.disposed) {
       return;
     }
 
-    this.state = this.reconnectAttempt > 0 ? "reconnecting" : "connecting";
+    this.state = state;
     const ws = new WebSocket(this.url);
+    this.ws = ws;
 
     ws.addEventListener("open", () => {
-      this.ws = ws;
+      if (this.ws !== ws) {
+        return;
+      }
       this.state = "open";
       this.reconnectAttempt = 0;
+      this.resolveOpenWaiters();
       this.flushQueue();
     });
 
     ws.addEventListener("message", (event) => {
+      if (this.ws !== ws) {
+        return;
+      }
       this.handleMessage(event.data);
     });
 
     ws.addEventListener("close", () => {
-      if (this.ws === ws) {
-        this.ws = null;
-        this.outboundQueue.length = 0;
-        for (const [id, pending] of this.pending.entries()) {
-          if (pending.timeout !== null) {
-            clearTimeout(pending.timeout);
-          }
-          this.pending.delete(id);
-          pending.reject(new Error("WebSocket connection closed."));
+      if (this.ws !== ws) {
+        return;
+      }
+      this.ws = null;
+      this.outboundQueue.length = 0;
+      for (const [id, pending] of this.pending.entries()) {
+        if (pending.timeout !== null) {
+          clearTimeout(pending.timeout);
         }
+        this.pending.delete(id);
+        pending.reject(new Error("WebSocket connection closed."));
       }
       if (this.disposed) {
         this.state = "disposed";
@@ -209,6 +279,9 @@ export class WsTransport {
     });
 
     ws.addEventListener("error", (event) => {
+      if (this.ws !== ws) {
+        return;
+      }
       // Log WebSocket errors for debugging (close event will follow)
       console.warn("WebSocket connection error", { type: event.type, url: this.url });
     });
@@ -303,7 +376,19 @@ export class WsTransport {
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      this.connect("reconnecting");
     }, delay);
+  }
+
+  private resolveOpenWaiters() {
+    for (const waiter of this.openWaiters) {
+      waiter.resolve();
+    }
+  }
+
+  private rejectOpenWaiters(error: Error) {
+    for (const waiter of this.openWaiters) {
+      waiter.reject(error);
+    }
   }
 }

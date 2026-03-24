@@ -27,8 +27,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
-import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
+import {
+  gitBranchesQueryOptions,
+  gitCreateWorktreeMutationOptions,
+  gitQueryKeys,
+} from "~/lib/gitReactQuery";
+import { syncOrchestrationSnapshot } from "~/lib/orchestrationSync";
+import { projectQueryKeys, projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
+import { providerQueryKeys } from "~/lib/providerReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import { isElectron } from "../env";
 import {
@@ -183,8 +189,10 @@ import {
   SendPhase,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { reconnectWsNativeApi } from "~/wsNativeApi";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
+const HEADER_RELOAD_TIMEOUT_MS = 3_000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -194,6 +202,25 @@ const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
 
 function formatOutgoingPrompt(params: {
   provider: ProviderKind;
@@ -340,6 +367,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
   const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
   const [isConnecting, _setIsConnecting] = useState(false);
+  const [isReloadingHeader, setIsReloadingHeader] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
@@ -1225,6 +1253,47 @@ export default function ChatView({ threadId }: ChatViewProps) {
       },
     });
   }, [diffOpen, navigate, threadId]);
+  const onReloadHeader = useCallback(() => {
+    if (isReloadingHeader) {
+      return;
+    }
+
+    setIsReloadingHeader(true);
+    const api = readNativeApi();
+    if (!api) {
+      window.location.reload();
+      return;
+    }
+
+    void (async () => {
+      try {
+        await reconnectWsNativeApi(HEADER_RELOAD_TIMEOUT_MS);
+        await withTimeout(
+          syncOrchestrationSnapshot(api),
+          HEADER_RELOAD_TIMEOUT_MS,
+          "Timed out while resyncing chat state.",
+        );
+
+        await Promise.all([
+          queryClient.cancelQueries({ queryKey: providerQueryKeys.all }),
+          queryClient.cancelQueries({ queryKey: projectQueryKeys.all }),
+          queryClient.cancelQueries({ queryKey: gitQueryKeys.all }),
+          queryClient.cancelQueries({ queryKey: serverQueryKeys.all }),
+        ]);
+
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: providerQueryKeys.all }),
+          queryClient.invalidateQueries({ queryKey: projectQueryKeys.all }),
+          queryClient.invalidateQueries({ queryKey: gitQueryKeys.all }),
+          queryClient.invalidateQueries({ queryKey: serverQueryKeys.all }),
+        ]);
+      } catch {
+        window.location.reload();
+      } finally {
+        setIsReloadingHeader(false);
+      }
+    })();
+  }, [isReloadingHeader, queryClient]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3651,6 +3720,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onReload={onReloadHeader}
+          isReloading={isReloadingHeader}
         />
       </header>
 

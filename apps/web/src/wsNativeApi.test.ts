@@ -18,6 +18,10 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requestMock = vi.fn<(...args: Array<unknown>) => Promise<unknown>>();
+const reconnectMock = vi.fn<(timeoutMs?: number) => Promise<void>>();
+const getStateMock = vi.fn<() => "connecting" | "open" | "reconnecting" | "closed" | "disposed">(
+  () => "open",
+);
 const showContextMenuFallbackMock =
   vi.fn<
     <T extends string>(
@@ -54,6 +58,8 @@ vi.mock("./wsTransport", () => {
     WsTransport: class MockWsTransport {
       request = requestMock;
       subscribe = subscribeMock;
+      reconnect = reconnectMock;
+      getState = getStateMock;
       getLatestPush(channel: string) {
         return latestPushByChannel.get(channel) ?? null;
       }
@@ -108,6 +114,10 @@ const defaultProviders: ReadonlyArray<ServerProvider> = [
 beforeEach(() => {
   vi.resetModules();
   requestMock.mockReset();
+  reconnectMock.mockReset();
+  reconnectMock.mockResolvedValue(undefined);
+  getStateMock.mockReset();
+  getStateMock.mockReturnValue("open");
   showContextMenuFallbackMock.mockReset();
   subscribeMock.mockClear();
   channelListeners.clear();
@@ -121,6 +131,13 @@ afterEach(() => {
 });
 
 describe("wsNativeApi", () => {
+  it("returns false when reconnect is requested before the ws api is created", async () => {
+    const { reconnectWsNativeApi } = await import("./wsNativeApi");
+
+    await expect(reconnectWsNativeApi()).resolves.toBe(false);
+    expect(reconnectMock).not.toHaveBeenCalled();
+  });
+
   it("delivers and caches valid server.welcome payloads", async () => {
     const { createWsNativeApi, onServerWelcome } = await import("./wsNativeApi");
 
@@ -251,6 +268,26 @@ describe("wsNativeApi", () => {
     onServerProvidersUpdated(lateListener);
     expect(lateListener).toHaveBeenCalledTimes(1);
     expect(lateListener).toHaveBeenCalledWith(payload);
+  });
+
+  it("reconnects the active ws transport when the socket is not open", async () => {
+    const { createWsNativeApi, reconnectWsNativeApi } = await import("./wsNativeApi");
+
+    getStateMock.mockReturnValue("closed");
+    createWsNativeApi();
+
+    await expect(reconnectWsNativeApi(321)).resolves.toBe(true);
+    expect(reconnectMock).toHaveBeenCalledWith(321);
+  });
+
+  it("skips reconnect when the active ws transport is already open", async () => {
+    const { createWsNativeApi, reconnectWsNativeApi } = await import("./wsNativeApi");
+
+    getStateMock.mockReturnValue("open");
+    createWsNativeApi();
+
+    await expect(reconnectWsNativeApi(321)).resolves.toBe(true);
+    expect(reconnectMock).not.toHaveBeenCalled();
   });
 
   it("forwards valid terminal and orchestration events", async () => {
