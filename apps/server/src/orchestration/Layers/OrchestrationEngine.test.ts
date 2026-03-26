@@ -200,7 +200,7 @@ describe("OrchestrationEngine", () => {
         workspaceRoot: "/tmp/imported-project",
         defaultModelSelection: {
           provider: "codex",
-          model: "gpt-5-codex",
+          model: "gpt-5.4",
         },
         createdAt,
       }),
@@ -214,7 +214,7 @@ describe("OrchestrationEngine", () => {
         title: "Imported Thread",
         modelSelection: {
           provider: "codex",
-          model: "gpt-5-codex",
+          model: "gpt-5.4",
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "full-access",

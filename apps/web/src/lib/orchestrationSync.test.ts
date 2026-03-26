@@ -34,7 +34,10 @@ function makeSnapshot(threadId: ThreadId): OrchestrationReadModel {
         id: ProjectId.makeUnsafe("project-1"),
         title: "Project 1",
         workspaceRoot: "/tmp/project-1",
-        defaultModel: "gpt-5.3-codex",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+        },
         createdAt: "2026-03-24T12:00:00.000Z",
         updatedAt: "2026-03-24T12:00:00.000Z",
         deletedAt: null,
@@ -46,7 +49,10 @@ function makeSnapshot(threadId: ThreadId): OrchestrationReadModel {
         id: threadId,
         projectId: ProjectId.makeUnsafe("project-1"),
         title: "Thread 1",
-        model: "gpt-5.3-codex",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+        },
         runtimeMode: DEFAULT_RUNTIME_MODE,
         interactionMode: DEFAULT_INTERACTION_MODE,
         branch: null,

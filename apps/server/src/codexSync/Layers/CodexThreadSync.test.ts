@@ -204,10 +204,9 @@ describe("CodexThreadSyncLive", () => {
 
     const dbPath = path.join(tempDir, "state.sqlite");
     const pathLayer = NodePath.layer;
-    const baseLayer = Layer.mergeAll(
-      ServerConfig.layerTest(process.cwd(), tempDir).pipe(Layer.provide(pathLayer)),
-      pathLayer,
-      NodeServices.layer,
+    const baseLayer = ServerConfig.layerTest(process.cwd(), tempDir).pipe(
+      Layer.provideMerge(pathLayer),
+      Layer.provideMerge(NodeServices.layer),
     );
     const persistenceLayer = makeSqlitePersistenceLive(dbPath).pipe(Layer.provide(baseLayer));
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -284,7 +283,10 @@ describe("CodexThreadSyncLive", () => {
           projectId: existingProjectId,
           title: "Existing Project",
           workspaceRoot: "/workspace/existing",
-          defaultModel: "gpt-5.4",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5.4",
+          },
           createdAt: "2026-03-10T18:06:40.000Z",
         }),
       );
@@ -295,7 +297,10 @@ describe("CodexThreadSyncLive", () => {
           threadId: existingThreadId,
           projectId: existingProjectId,
           title: "Existing Thread Before Sync",
-          model: "gpt-5.4",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.4",
+          },
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: null,

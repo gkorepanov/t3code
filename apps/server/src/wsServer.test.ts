@@ -748,12 +748,12 @@ describe("WebSocket Server", () => {
   });
 
   it("returns 404 for missing absolute file paths instead of falling back to SPA html", async () => {
-    const stateDir = makeTempDir("t3code-state-absolute-missing-");
+    const baseDir = makeTempDir("t3code-state-absolute-missing-");
     const staticDir = makeTempDir("t3code-static-absolute-missing-");
     const filePath = path.join(makeTempDir("t3code-absolute-missing-file-"), "missing.png");
     fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>static-root</h1>", "utf8");
 
-    server = await createTestServer({ cwd: "/test/project", stateDir, staticDir });
+    server = await createTestServer({ cwd: "/test/project", baseDir, staticDir });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
@@ -764,11 +764,11 @@ describe("WebSocket Server", () => {
   });
 
   it("keeps single-segment app routes on the SPA handler", async () => {
-    const stateDir = makeTempDir("t3code-state-single-segment-routes-");
+    const baseDir = makeTempDir("t3code-state-single-segment-routes-");
     const staticDir = makeTempDir("t3code-static-single-segment-routes-");
     fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>static-root</h1>", "utf8");
 
-    server = await createTestServer({ cwd: "/test/project", stateDir, staticDir });
+    server = await createTestServer({ cwd: "/test/project", baseDir, staticDir });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
@@ -815,14 +815,14 @@ describe("WebSocket Server", () => {
   });
 
   it("serves built static assets before absolute file routing", async () => {
-    const stateDir = makeTempDir("t3code-state-static-assets-");
+    const baseDir = makeTempDir("t3code-state-static-assets-");
     const staticDir = makeTempDir("t3code-static-assets-");
     const assetPath = path.join(staticDir, "assets", "index.js");
     fs.mkdirSync(path.dirname(assetPath), { recursive: true });
     fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>static-root</h1>", "utf8");
     fs.writeFileSync(assetPath, "console.log('asset');", "utf8");
 
-    server = await createTestServer({ cwd: "/test/project", stateDir, staticDir });
+    server = await createTestServer({ cwd: "/test/project", baseDir, staticDir });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
