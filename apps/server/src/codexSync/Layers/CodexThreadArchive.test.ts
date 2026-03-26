@@ -25,7 +25,10 @@ function makeReadModel(threadId: ThreadId): OrchestrationReadModel {
         id: projectId,
         title: "Project",
         workspaceRoot: "/workspace/project",
-        defaultModel: "gpt-5",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5",
+        },
         scripts: [],
         createdAt: now,
         updatedAt: now,
@@ -37,7 +40,10 @@ function makeReadModel(threadId: ThreadId): OrchestrationReadModel {
         id: threadId,
         projectId,
         title: "Imported thread",
-        model: "gpt-5",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5",
+        },
         interactionMode: "default",
         runtimeMode: "full-access",
         branch: null,

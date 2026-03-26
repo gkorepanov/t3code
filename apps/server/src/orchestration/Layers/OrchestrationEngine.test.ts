@@ -132,7 +132,10 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-import"),
         title: "Imported Project",
         workspaceRoot: "/tmp/imported-project",
-        defaultModel: "gpt-5.4",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5.4",
+        },
         createdAt,
       }),
     );
@@ -143,7 +146,10 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.makeUnsafe("thread-import"),
         projectId: asProjectId("project-import"),
         title: "Imported Thread",
-        model: "gpt-5.4",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.4",
+        },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "full-access",
         branch: null,

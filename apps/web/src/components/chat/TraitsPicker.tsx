@@ -99,11 +99,10 @@ function getSelectedTraits(
     : null;
 
   // Fast mode
-  const fastModeEnabled =
-    caps.supportsFastMode
-      ? ((modelOptions as { fastMode?: boolean } | undefined)?.fastMode ??
-        DEFAULT_FAST_MODE_BY_PROVIDER[provider])
-      : null;
+  const fastModeEnabled = caps.supportsFastMode
+    ? ((modelOptions as { fastMode?: boolean } | undefined)?.fastMode ??
+      DEFAULT_FAST_MODE_BY_PROVIDER[provider])
+    : null;
 
   // Prompt-controlled effort (e.g. ultrathink in prompt text)
   const ultrathinkPromptControlled =

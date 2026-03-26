@@ -109,8 +109,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
       const promptEffort =
         trimOrNull(input.modelOptions?.codex?.reasoningEffort) ??
         DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex;
-      const fastMode =
-        input.modelOptions?.codex?.fastMode ?? DEFAULT_FAST_MODE_BY_PROVIDER.codex;
+      const fastMode = input.modelOptions?.codex?.fastMode ?? DEFAULT_FAST_MODE_BY_PROVIDER.codex;
       return {
         ...baseState,
         promptEffort,

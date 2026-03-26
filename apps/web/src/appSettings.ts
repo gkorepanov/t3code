@@ -36,9 +36,7 @@ const withDefaults =
     );
 
 export const AppSettingsSchema = Schema.Struct({
-  browserFileLinkPrefix: Schema.String.check(Schema.isMaxLength(4096)).pipe(
-    withDefaults(() => ""),
-  ),
+  browserFileLinkPrefix: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   claudeBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   codexBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   codexHomePath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),

@@ -279,9 +279,7 @@ function SettingsRouteView() {
     ...(theme !== "system" ? ["Theme"] : []),
     ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
     ...(settings.chatFontSize !== defaults.chatFontSize ? ["Chat font size"] : []),
-    ...(settings.browserFileLinkPrefix !== defaults.browserFileLinkPrefix
-      ? ["Link opening"]
-      : []),
+    ...(settings.browserFileLinkPrefix !== defaults.browserFileLinkPrefix ? ["Link opening"] : []),
     ...(settings.diffWordWrap !== defaults.diffWordWrap ? ["Diff line wrapping"] : []),
     ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
       ? ["Assistant output"]

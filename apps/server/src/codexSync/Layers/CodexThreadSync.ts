@@ -304,7 +304,10 @@ export const CodexThreadSyncLive = Layer.effect(
                   projectId,
                   title: projectTitleFromCwd(candidate.cwd),
                   workspaceRoot: candidate.cwd,
-                  defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
+                  defaultModelSelection: {
+                    provider: "codex",
+                    model: DEFAULT_MODEL_BY_PROVIDER.codex,
+                  },
                   createdAt: candidate.createdAt,
                 });
                 projectIdByWorkspaceRoot.set(candidate.cwd, projectId);
@@ -319,7 +322,13 @@ export const CodexThreadSyncLive = Layer.effect(
                 threadId,
                 projectId,
                 title: resolvedTitle,
-                model: project?.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex,
+                modelSelection:
+                  project?.defaultModelSelection?.provider === "codex"
+                    ? project.defaultModelSelection
+                    : {
+                        provider: "codex",
+                        model: DEFAULT_MODEL_BY_PROVIDER.codex,
+                      },
                 runtimeMode: "full-access",
                 interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
                 branch: null,
