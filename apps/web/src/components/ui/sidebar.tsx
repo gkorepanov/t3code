@@ -302,11 +302,19 @@ function Sidebar({
   );
 }
 
-function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar, openMobile } = useSidebar();
+function SidebarTrigger({
+  className,
+  onClick,
+  "aria-label": ariaLabel,
+  ...props
+}: React.ComponentProps<typeof Button>) {
+  const { isMobile, open, openMobile, toggleSidebar } = useSidebar();
+  const isOpen = isMobile ? openMobile : open;
+  const label = ariaLabel ?? (isOpen ? "Hide sidebar" : "Show sidebar");
 
   return (
     <Button
+      aria-label={label}
       className={cn("size-7", className)}
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
@@ -318,8 +326,8 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       variant="ghost"
       {...props}
     >
-      {openMobile ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
-      <span className="sr-only">Toggle Sidebar</span>
+      {isOpen ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
+      <span className="sr-only">{label}</span>
     </Button>
   );
 }

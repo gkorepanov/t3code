@@ -6,6 +6,7 @@ import {
   SidebarMenuButton,
   SidebarMenuSubButton,
   SidebarProvider,
+  SidebarTrigger,
 } from "./sidebar";
 
 function renderSidebarButton(className?: string) {
@@ -49,5 +50,23 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain('data-slot="sidebar-menu-sub-button"');
     expect(html).toContain("cursor-pointer");
+  });
+
+  it("uses state-aware labels for the sidebar trigger on desktop", () => {
+    const openHtml = renderToStaticMarkup(
+      <SidebarProvider>
+        <SidebarTrigger />
+      </SidebarProvider>,
+    );
+    const closedHtml = renderToStaticMarkup(
+      <SidebarProvider defaultOpen={false}>
+        <SidebarTrigger />
+      </SidebarProvider>,
+    );
+
+    expect(openHtml).toContain('aria-label="Hide sidebar"');
+    expect(openHtml).toContain("Hide sidebar");
+    expect(closedHtml).toContain('aria-label="Show sidebar"');
+    expect(closedHtml).toContain("Show sidebar");
   });
 });

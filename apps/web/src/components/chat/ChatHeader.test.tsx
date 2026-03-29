@@ -49,6 +49,8 @@ describe("ChatHeader", () => {
 
     expect(markup).toContain("hidden min-w-0 shrink truncate md:inline-flex");
     expect(markup).toContain("hidden md:block");
+    expect(markup).toContain('data-slot="sidebar-trigger"');
+    expect(markup).not.toContain("md:hidden");
     expect(markup).toContain('aria-label="Toggle diff panel"');
     expect(markup).toContain('aria-label="Reload chat"');
     expect(markup.indexOf('aria-label="Toggle diff panel"')).toBeLessThan(
