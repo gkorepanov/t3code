@@ -25,19 +25,30 @@ import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { CodexAdapter } from "./provider/Services/CodexAdapter.ts";
+import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor.ts";
+import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
+import { type OrchestrationProjectorDecodeError } from "./orchestration/Errors.ts";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
 import { ServerSettingsService } from "./serverSettings";
 
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
-import { KeybindingsLive } from "./keybindings";
+import { Keybindings, KeybindingsLive } from "./keybindings";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { PtyAdapter } from "./terminal/Services/PTY";
+import { GitManager } from "./git/Services/GitManager.ts";
+import { GitCore } from "./git/Services/GitCore.ts";
+import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { CodexThreadArchiveLive } from "./codexSync/Layers/CodexThreadArchive.ts";
 import { CodexThreadSyncLive } from "./codexSync/Layers/CodexThreadSync.ts";
+import { CodexThreadArchive } from "./codexSync/Services/CodexThreadArchive.ts";
+import { CodexThreadSync } from "./codexSync/Services/CodexThreadSync.ts";
+import { type OrchestrationEventStoreError } from "./persistence/Errors.ts";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -98,11 +109,35 @@ export function makeServerProviderLayer(): Layer.Layer<
   }).pipe(Layer.unwrap);
 }
 
-export function makeServerSyncLayer() {
+export function makeServerSyncLayer(): Layer.Layer<
+  CodexThreadSync | CodexThreadArchive,
+  never,
+  | OrchestrationEngineService
+  | ProviderService
+  | ProviderSessionRuntimeRepository
+  | CodexAdapter
+  | ServerSettingsService
+> {
   return Layer.mergeAll(CodexThreadSyncLive, CodexThreadArchiveLive);
 }
 
-export function makeServerRuntimeServicesLayer() {
+export function makeServerRuntimeServicesLayer(): Layer.Layer<
+  | OrchestrationEngineService
+  | ProjectionSnapshotQuery
+  | CheckpointDiffQuery
+  | OrchestrationReactor
+  | GitManager
+  | GitCore
+  | TerminalManager
+  | Keybindings,
+  OrchestrationProjectorDecodeError | OrchestrationEventStoreError,
+  | SqlClient.SqlClient
+  | ServerConfig
+  | ServerSettingsService
+  | ProviderService
+  | FileSystem.FileSystem
+  | AnalyticsService
+> {
   const textGenerationLayer = RoutingTextGenerationLive;
   const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
 
@@ -150,6 +185,7 @@ export function makeServerRuntimeServicesLayer() {
   );
 
   return Layer.mergeAll(
+    runtimeServicesLayer,
     orchestrationReactorLayer,
     GitCoreLive,
     gitManagerLayer,

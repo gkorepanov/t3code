@@ -50,6 +50,7 @@ function makeReadModel(threadId: ThreadId): OrchestrationReadModel {
         worktreePath: null,
         latestTurn: null,
         createdAt: now,
+        archivedAt: null,
         updatedAt: now,
         deletedAt: null,
         messages: [],
@@ -136,12 +137,8 @@ describe("CodexThreadArchiveLive", () => {
           providerThreadId: "codex-thread-1",
           cwd: "/workspace/project",
           runtimeMode: "full-access",
-          providerOptions: {
-            codex: {
-              binaryPath: "/usr/local/bin/codex",
-              homePath: "/tmp/.codex",
-            },
-          },
+          binaryPath: "/usr/local/bin/codex",
+          homePath: "/tmp/.codex",
         });
       }),
     );

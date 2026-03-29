@@ -267,7 +267,6 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const keybindingsManager = yield* Keybindings;
   const serverSettingsManager = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
-  const codexThreadArchive = yield* CodexThreadArchive;
   const codexThreadSync = yield* CodexThreadSync;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;

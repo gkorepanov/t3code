@@ -28,7 +28,6 @@ import {
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { Server } from "./wsServer";
-import { ServerLoggerLive } from "./serverLogger";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { readBootstrapEnvelope } from "./bootstrap";
@@ -294,10 +293,9 @@ const ServerConfigLive = (input: CliInput) =>
     }),
   );
 
-const LayerLive = (input: CliInput) =>
-  Layer.empty.pipe(
+const LayerLive = (input: CliInput) => {
+  const baseLayer = Layer.empty.pipe(
     Layer.provideMerge(makeServerRuntimeServicesLayer()),
-    Layer.provideMerge(makeServerSyncLayer()),
     Layer.provideMerge(makeServerProviderLayer()),
     Layer.provideMerge(ProviderRegistryLive),
     Layer.provideMerge(SqlitePersistence.layerConfig),
@@ -305,6 +303,9 @@ const LayerLive = (input: CliInput) =>
     Layer.provideMerge(ServerSettingsLive),
     Layer.provideMerge(ServerConfigLive(input)),
   );
+  const syncLayer = makeServerSyncLayer().pipe(Layer.provide(baseLayer));
+  return Layer.merge(baseLayer, syncLayer);
+};
 
 const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";

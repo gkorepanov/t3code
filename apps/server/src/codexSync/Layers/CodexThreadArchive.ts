@@ -116,16 +116,8 @@ export const makeCodexThreadArchiveLive = (options?: CodexThreadArchiveLiveOptio
                 providerThreadId: codexThreadId,
                 cwd,
                 runtimeMode,
-                ...(codexBinaryPath || codexHomePath
-                  ? {
-                      providerOptions: {
-                        codex: {
-                          ...(codexBinaryPath ? { binaryPath: codexBinaryPath } : {}),
-                          ...(codexHomePath ? { homePath: codexHomePath } : {}),
-                        },
-                      },
-                    }
-                  : {}),
+                ...(codexBinaryPath ? { binaryPath: codexBinaryPath } : {}),
+                ...(codexHomePath ? { homePath: codexHomePath } : {}),
               }),
             ),
           );

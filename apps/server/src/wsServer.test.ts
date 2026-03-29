@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Exit, Layer, PlatformError, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Layer, Option, PlatformError, PubSub, Scope, Stream } from "effect";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { createServer } from "./wsServer";
 import WebSocket from "ws";
@@ -52,6 +52,8 @@ import { makeSqlitePersistenceLive, SqlitePersistenceMemory } from "./persistenc
 import { SqlClient, SqlError } from "effect/unstable/sql";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
 import { ProviderRegistry, type ProviderRegistryShape } from "./provider/Services/ProviderRegistry";
+import { CodexAdapter } from "./provider/Services/CodexAdapter";
+import { ProviderSessionRuntimeRepository } from "./persistence/Services/ProviderSessionRuntime";
 import { Open, type OpenShape } from "./open";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
 import type { GitCoreShape } from "./git/Services/GitCore.ts";
@@ -510,7 +512,10 @@ describe("WebSocket Server", () => {
       authToken?: string;
       baseDir?: string;
       staticDir?: string;
-      providerLayer?: Layer.Layer<ProviderService, never>;
+      providerLayer?: Layer.Layer<
+        ProviderService | CodexAdapter | ProviderSessionRuntimeRepository,
+        never
+      >;
       providerRegistry?: ProviderRegistryShape;
       codexThreadArchive?: CodexThreadArchiveShape;
       codexThreadSync?: CodexThreadSyncShape;
@@ -569,9 +574,7 @@ describe("WebSocket Server", () => {
       runtimeOverrides,
     );
     const defaultSyncLayer = makeServerSyncLayer().pipe(Layer.provide(baseRuntimeLayer));
-    const defaultCodexThreadSyncLayer = CodexThreadSyncLive.pipe(
-      Layer.provide(baseRuntimeLayer),
-    );
+    const defaultCodexThreadSyncLayer = CodexThreadSyncLive.pipe(Layer.provide(baseRuntimeLayer));
     const defaultCodexThreadArchiveLayer = CodexThreadArchiveLive.pipe(
       Layer.provide(baseRuntimeLayer),
     );
@@ -1522,7 +1525,31 @@ describe("WebSocket Server", () => {
       rollbackConversation: () => unsupported(),
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     };
-    const providerLayer = Layer.succeed(ProviderService, providerService);
+    const providerLayer = Layer.mergeAll(
+      Layer.succeed(ProviderService, providerService),
+      Layer.succeed(CodexAdapter, {
+        provider: "codex",
+        capabilities: { sessionModelSwitch: "in-session" },
+        startSession: () => unsupported(),
+        sendTurn: () => unsupported(),
+        interruptTurn: () => unsupported(),
+        respondToRequest: () => unsupported(),
+        respondToUserInput: () => unsupported(),
+        stopSession: () => unsupported(),
+        listSessions: () => Effect.succeed([]),
+        hasSession: () => Effect.succeed(false),
+        readThread: () => unsupported(),
+        rollbackThread: () => unsupported(),
+        stopAll: () => unsupported(),
+        streamEvents: Stream.empty,
+      }),
+      Layer.succeed(ProviderSessionRuntimeRepository, {
+        getByThreadId: () => Effect.succeed(Option.none()),
+        list: () => Effect.succeed([]),
+        upsert: () => Effect.void,
+        deleteByThreadId: () => Effect.void,
+      }),
+    );
 
     server = await createTestServer({
       cwd: "/test",

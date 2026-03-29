@@ -631,11 +631,7 @@ export function GeneralSettingsPanel() {
       .finally(() => {
         setIsSyncingCodexThreads(false);
       });
-  }, [
-    settings.providers.codex.binaryPath,
-    settings.providers.codex.homePath,
-    syncServerReadModel,
-  ]);
+  }, [settings.providers.codex.binaryPath, settings.providers.codex.homePath, syncServerReadModel]);
 
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
@@ -1169,21 +1165,17 @@ export function GeneralSettingsPanel() {
         >
           <div className="mt-4 border-t border-border pt-4">
             <label htmlFor="browser-file-link-prefix" className="block space-y-1">
-              <span className="text-xs font-medium text-foreground">
-                Browser file-link prefix
-              </span>
+              <span className="text-xs font-medium text-foreground">Browser file-link prefix</span>
               <Input
                 id="browser-file-link-prefix"
                 value={browserFileLinkPrefix}
-                onChange={(event) =>
-                  updateSettings({ browserFileLinkPrefix: event.target.value })
-                }
+                onChange={(event) => updateSettings({ browserFileLinkPrefix: event.target.value })}
                 placeholder="vscode://vscode-remote/ssh-remote+wf-gk/"
                 spellCheck={false}
               />
               <span className="text-xs text-muted-foreground">
-                Plain click opens <code>prefix + path</code>; links without an explicit line
-                anchor append <code>:0</code>. Modified clicks keep the original browser URL.
+                Plain click opens <code>prefix + path</code>; links without an explicit line anchor
+                append <code>:0</code>. Modified clicks keep the original browser URL.
               </span>
             </label>
 
@@ -1427,9 +1419,7 @@ export function GeneralSettingsPanel() {
                           </div>
 
                           {codexSyncSummary ? (
-                            <p className="mt-3 text-xs text-muted-foreground">
-                              {codexSyncSummary}
-                            </p>
+                            <p className="mt-3 text-xs text-muted-foreground">{codexSyncSummary}</p>
                           ) : null}
                           {codexSyncError ? (
                             <p className="mt-2 whitespace-pre-wrap text-xs text-destructive">

@@ -77,7 +77,8 @@ export function normalizeCodexModelOptionsWithCapabilities(
   modelOptions: CodexModelOptions | null | undefined,
 ): CodexModelOptions | undefined {
   const reasoningEffort =
-    resolveEffort(caps, modelOptions?.reasoningEffort) ?? DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex;
+    resolveEffort(caps, modelOptions?.reasoningEffort) ??
+    DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex;
   const fastModeEnabled = caps.supportsFastMode
     ? (modelOptions?.fastMode ?? DEFAULT_FAST_MODE_BY_PROVIDER.codex)
     : undefined;

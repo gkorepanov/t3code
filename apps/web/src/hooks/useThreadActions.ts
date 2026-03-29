@@ -67,7 +67,13 @@ export function useThreadActions() {
   }, []);
 
   const deleteThread = useCallback(
-    async (threadId: ThreadId, opts: { deletedThreadIds?: ReadonlySet<ThreadId> } = {}) => {
+    async (
+      threadId: ThreadId,
+      opts: {
+        deletedThreadIds?: ReadonlySet<ThreadId>;
+        skipCodexArchive?: boolean;
+      } = {},
+    ) => {
       const api = readNativeApi();
       if (!api) return;
       const thread = threads.find((entry) => entry.id === threadId);
@@ -94,7 +100,33 @@ export function useThreadActions() {
           ].join("\n"),
         ));
 
-      if (thread.session && thread.session.status !== "closed") {
+      let archivedCodexThreadId: string | null = null;
+      if (!opts.skipCodexArchive) {
+        try {
+          const archiveResult = await api.server.archiveCodexThread({
+            threadId,
+            ...(appSettings.providers.codex.binaryPath.trim().length > 0
+              ? { codexBinaryPath: appSettings.providers.codex.binaryPath.trim() }
+              : {}),
+            ...(appSettings.providers.codex.homePath.trim().length > 0
+              ? { codexHomePath: appSettings.providers.codex.homePath.trim() }
+              : {}),
+          });
+          archivedCodexThreadId = archiveResult.codexThreadId;
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to archive Codex thread",
+            description:
+              error instanceof Error
+                ? error.message
+                : "The linked Codex thread could not be archived, so the T3 thread was not deleted.",
+          });
+          return;
+        }
+      }
+
+      if (archivedCodexThreadId === null && thread.session && thread.session.status !== "closed") {
         await api.orchestration
           .dispatchCommand({
             type: "thread.session.stop",
@@ -169,6 +201,8 @@ export function useThreadActions() {
       clearComposerDraftForThread,
       clearProjectDraftThreadById,
       clearTerminalState,
+      appSettings.providers.codex.binaryPath,
+      appSettings.providers.codex.homePath,
       appSettings.sidebarThreadSortOrder,
       navigate,
       projects,

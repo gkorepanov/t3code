@@ -140,7 +140,8 @@ export interface CodexAppServerArchiveThreadInput {
   readonly providerThreadId: string;
   readonly cwd: string;
   readonly runtimeMode?: RuntimeMode;
-  readonly providerOptions?: ProviderSessionStartInput["providerOptions"];
+  readonly binaryPath?: string;
+  readonly homePath?: string;
 }
 
 export interface CodexThreadTurnSnapshot {
@@ -896,7 +897,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           cwd: input.cwd,
           runtimeMode: input.runtimeMode ?? "full-access",
           resumeCursor: { threadId: input.providerThreadId },
-          ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
+          binaryPath: input.binaryPath ?? "codex",
+          ...(input.homePath ? { homePath: input.homePath } : {}),
         });
         startedSession = true;
         context = this.requireSession(input.threadId);

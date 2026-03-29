@@ -11,6 +11,7 @@ import {
   WS_CHANNELS,
   WS_METHODS,
 } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts/settings";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { HttpResponse, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
@@ -45,13 +46,17 @@ function createBaseServerConfig(): ServerConfig {
     keybindingsConfigPath: "/repo/alpha/.t3code-keybindings.json",
     keybindings: [],
     issues: [],
+    settings: DEFAULT_SERVER_SETTINGS,
     providers: [
       {
         provider: "codex",
+        enabled: true,
+        installed: true,
+        version: "0.116.0",
         status: "ready",
-        available: true,
         authStatus: "authenticated",
         checkedAt: NOW_ISO,
+        models: [],
       },
     ],
     availableEditors: [],
@@ -121,6 +126,7 @@ function createSnapshot(): OrchestrationReadModel {
         worktreePath: null,
         latestTurn: null,
         createdAt: NOW_ISO,
+        archivedAt: null,
         updatedAt: NOW_ISO,
         deletedAt: null,
         messages: [
@@ -150,6 +156,7 @@ function createSnapshot(): OrchestrationReadModel {
         worktreePath: null,
         latestTurn: null,
         createdAt: NOW_ISO,
+        archivedAt: null,
         updatedAt: NOW_ISO,
         deletedAt: null,
         messages: [
