@@ -119,6 +119,8 @@ import {
   sortThreadsForSidebar,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { filterThreadsForSidebarSearch, normalizeSidebarSearchQuery } from "./Sidebar.search";
+import SidebarSearchInput from "./SidebarSearchInput";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 
@@ -352,6 +354,7 @@ export default function Sidebar() {
   });
   const [addingProject, setAddingProject] = useState(false);
   const [newCwd, setNewCwd] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [addProjectError, setAddProjectError] = useState<string | null>(null);
@@ -1180,61 +1183,83 @@ export default function Sidebar() {
     () => sortProjectsForSidebar(projects, visibleThreads, appSettings.sidebarProjectSortOrder),
     [appSettings.sidebarProjectSortOrder, projects, visibleThreads],
   );
+  const normalizedSearchQuery = useMemo(
+    () => normalizeSidebarSearchQuery(searchQuery),
+    [searchQuery],
+  );
+  const isSearchActive = normalizedSearchQuery.length > 0;
   const isManualProjectSorting = appSettings.sidebarProjectSortOrder === "manual";
   const renderedProjects = useMemo(
     () =>
-      sortedProjects.map((project) => {
-        const projectThreads = sortThreadsForSidebar(
-          visibleThreads.filter((thread) => thread.projectId === project.id),
-          appSettings.sidebarThreadSortOrder,
-        );
-        const projectStatus = resolveProjectStatusIndicator(
-          projectThreads.map((thread) =>
-            resolveThreadStatusPill({
-              thread,
-              hasPendingApprovals: derivePendingApprovals(thread.activities).length > 0,
-              hasPendingUserInput: derivePendingUserInputs(thread.activities).length > 0,
-            }),
-          ),
-        );
-        const activeThreadId = routeThreadId ?? undefined;
-        const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
-        const pinnedCollapsedThread =
-          !project.expanded && activeThreadId
-            ? (projectThreads.find((thread) => thread.id === activeThreadId) ?? null)
-            : null;
-        const shouldShowThreadPanel = project.expanded || pinnedCollapsedThread !== null;
-        const { hasHiddenThreads, visibleThreads: visibleProjectThreads } =
-          getVisibleThreadsForProject({
-            threads: projectThreads,
-            activeThreadId,
-            isThreadListExpanded,
-            previewLimit: THREAD_PREVIEW_LIMIT,
-          });
-        const orderedProjectThreadIds = projectThreads.map((thread) => thread.id);
-        const renderedThreads = pinnedCollapsedThread
-          ? [pinnedCollapsedThread]
-          : visibleProjectThreads;
+      sortedProjects
+        .map((project) => {
+          const projectThreads = sortThreadsForSidebar(
+            visibleThreads.filter((thread) => thread.projectId === project.id),
+            appSettings.sidebarThreadSortOrder,
+          );
+          const displayThreads = isSearchActive
+            ? filterThreadsForSidebarSearch(projectThreads, normalizedSearchQuery)
+            : projectThreads;
+          const projectExpandedForRender = isSearchActive || project.expanded;
+          const projectStatus = resolveProjectStatusIndicator(
+            displayThreads.map((thread) =>
+              resolveThreadStatusPill({
+                thread,
+                hasPendingApprovals: derivePendingApprovals(thread.activities).length > 0,
+                hasPendingUserInput: derivePendingUserInputs(thread.activities).length > 0,
+              }),
+            ),
+          );
+          const activeThreadId = routeThreadId ?? undefined;
+          const isThreadListExpanded = !isSearchActive && expandedThreadListsByProject.has(project.id);
+          const pinnedCollapsedThread =
+            !isSearchActive && !project.expanded && activeThreadId
+              ? (projectThreads.find((thread) => thread.id === activeThreadId) ?? null)
+              : null;
+          const shouldShowThreadPanel =
+            isSearchActive || project.expanded || pinnedCollapsedThread !== null;
+          const { hasHiddenThreads, visibleThreads: visibleProjectThreads } = isSearchActive
+            ? {
+                hasHiddenThreads: false,
+                visibleThreads: displayThreads,
+              }
+            : getVisibleThreadsForProject({
+                threads: projectThreads,
+                activeThreadId,
+                isThreadListExpanded,
+                previewLimit: THREAD_PREVIEW_LIMIT,
+              });
+          const orderedProjectThreadIds = displayThreads.map((thread) => thread.id);
+          const renderedThreads = isSearchActive
+            ? displayThreads
+            : pinnedCollapsedThread
+              ? [pinnedCollapsedThread]
+              : visibleProjectThreads;
 
-        return {
-          hasHiddenThreads,
-          orderedProjectThreadIds,
-          project,
-          projectStatus,
-          projectThreads,
-          renderedThreads,
-          shouldShowThreadPanel,
-          isThreadListExpanded,
-        };
-      }),
+          return {
+            hasHiddenThreads,
+            orderedProjectThreadIds,
+            project,
+            projectExpandedForRender,
+            projectStatus,
+            projectThreads,
+            renderedThreads,
+            shouldShowThreadPanel,
+            isThreadListExpanded,
+          };
+        })
+        .filter((renderedProject) => !isSearchActive || renderedProject.renderedThreads.length > 0),
     [
       appSettings.sidebarThreadSortOrder,
       expandedThreadListsByProject,
+      isSearchActive,
+      normalizedSearchQuery,
       routeThreadId,
       sortedProjects,
       visibleThreads,
     ],
   );
+  const hasVisibleProjects = renderedProjects.length > 0;
   const threadJumpCommandById = useMemo(() => {
     const mapping = new Map<ThreadId, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
     let visibleThreadIndex = 0;
@@ -1363,6 +1388,7 @@ export default function Sidebar() {
   ) {
     const {
       hasHiddenThreads,
+      projectExpandedForRender,
       orderedProjectThreadIds,
       project,
       projectStatus,
@@ -1636,7 +1662,7 @@ export default function Sidebar() {
               });
             }}
           >
-            {!project.expanded && projectStatus ? (
+            {!projectExpandedForRender && projectStatus ? (
               <span
                 aria-hidden="true"
                 title={projectStatus.label}
@@ -1654,7 +1680,7 @@ export default function Sidebar() {
             ) : (
               <ChevronRightIcon
                 className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
-                  project.expanded ? "rotate-90" : ""
+                  projectExpandedForRender ? "rotate-90" : ""
                 }`}
               />
             )}
@@ -1702,7 +1728,7 @@ export default function Sidebar() {
         >
           {shouldShowThreadPanel && renderedThreads.map((thread) => renderThreadRow(thread))}
 
-          {project.expanded && hasHiddenThreads && !isThreadListExpanded && (
+          {!isSearchActive && project.expanded && hasHiddenThreads && !isThreadListExpanded && (
             <SidebarMenuSubItem className="w-full">
               <SidebarMenuSubButton
                 render={<button type="button" />}
@@ -1717,7 +1743,7 @@ export default function Sidebar() {
               </SidebarMenuSubButton>
             </SidebarMenuSubItem>
           )}
-          {project.expanded && hasHiddenThreads && isThreadListExpanded && (
+          {!isSearchActive && project.expanded && hasHiddenThreads && isThreadListExpanded && (
             <SidebarMenuSubItem className="w-full">
               <SidebarMenuSubButton
                 render={<button type="button" />}
@@ -2025,6 +2051,8 @@ export default function Sidebar() {
                 </div>
               </div>
 
+              <SidebarSearchInput value={searchQuery} onValueChange={setSearchQuery} />
+
               {shouldShowProjectPathEntry && (
                 <div className="mb-2 px-1">
                   {isElectron && (
@@ -2128,6 +2156,11 @@ export default function Sidebar() {
               {projects.length === 0 && !shouldShowProjectPathEntry && (
                 <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
                   No projects yet
+                </div>
+              )}
+              {isSearchActive && !hasVisibleProjects && (
+                <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
+                  No dialogs found.
                 </div>
               )}
             </SidebarGroup>
