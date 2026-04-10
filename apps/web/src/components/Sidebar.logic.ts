@@ -482,7 +482,11 @@ function getThreadSortTimestamp(
 }
 
 export function sortThreadsForSidebar<
-  T extends Pick<Thread, "id" | "createdAt" | "updatedAt"> & SidebarThreadSortInput,
+  T extends {
+    id: string;
+    createdAt: Thread["createdAt"];
+    updatedAt?: Thread["updatedAt"];
+  } & SidebarThreadSortInput,
 >(threads: readonly T[], sortOrder: SidebarThreadSortOrder): T[] {
   return threads.toSorted((left, right) => {
     const rightTimestamp = getThreadSortTimestamp(right, sortOrder);
