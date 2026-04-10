@@ -68,7 +68,6 @@ import { gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
@@ -118,6 +117,7 @@ import {
   sortThreadsForSidebar,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { useSidebarThreadNavigation } from "./sidebar/useSidebarThreadNavigation";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 
@@ -333,12 +333,10 @@ export default function Sidebar() {
   const clearProjectDraftThreadId = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadId,
   );
-  const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
-  const { handleNewThread } = useHandleNewThread();
   const { archiveThread, deleteThread } = useThreadActions();
   const routeThreadId = useParams({
     strict: false,
@@ -374,6 +372,15 @@ export default function Sidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
+  const navigate = useNavigate();
+  const { focusMostRecentThreadForProject, handleNewThread, navigateToThread } =
+    useSidebarThreadNavigation({
+      clearSelection,
+      selectedThreadIdsSize: selectedThreadIds.size,
+      setSelectionAnchor,
+      threadSortOrder: appSettings.sidebarThreadSortOrder,
+      threads,
+    });
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
@@ -478,22 +485,6 @@ export default function Sidebar() {
       }
     },
     [archiveThread],
-  );
-
-  const focusMostRecentThreadForProject = useCallback(
-    (projectId: ProjectId) => {
-      const latestThread = sortThreadsForSidebar(
-        threads.filter((thread) => thread.projectId === projectId && thread.archivedAt === null),
-        appSettings.sidebarThreadSortOrder,
-      )[0];
-      if (!latestThread) return;
-
-      void navigate({
-        to: "/$threadId",
-        params: { threadId: latestThread.id },
-      });
-    },
-    [appSettings.sidebarThreadSortOrder, navigate, threads],
   );
 
   const addProjectFromPath = useCallback(
@@ -831,33 +822,16 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-      });
+      navigateToThread(threadId);
     },
     [
       clearSelection,
-      navigate,
+      navigateToThread,
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
       toggleThreadSelection,
     ],
-  );
-
-  const navigateToThread = useCallback(
-    (threadId: ThreadId) => {
-      if (selectedThreadIds.size > 0) {
-        clearSelection();
-      }
-      setSelectionAnchor(threadId);
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-      });
-    },
-    [clearSelection, navigate, selectedThreadIds.size, setSelectionAnchor],
   );
 
   const handleProjectContextMenu = useCallback(
