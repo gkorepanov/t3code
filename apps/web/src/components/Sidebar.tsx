@@ -164,6 +164,7 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { selectThreadJumpThreadIds } from "./sidebar/threadJumpTargets";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
@@ -2878,7 +2879,6 @@ export default function Sidebar() {
     [clearSelection, closeMobileSidebar, navigate, setSelectionAnchor],
   );
 
-
   const projectDnDSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
@@ -2983,7 +2983,7 @@ export default function Sidebar() {
     visibleThreads,
   ]);
   const isManualProjectSorting = sidebarProjectSortOrder === "manual";
-  const visibleSidebarThreadKeys = useMemo(
+  const visibleSidebarThreadsInVisualOrder = useMemo(
     () =>
       sortedProjects.flatMap((project) => {
         const projectThreads = sortThreads(
@@ -3012,10 +3012,7 @@ export default function Sidebar() {
           isThreadListExpanded || !hasOverflowingThreads
             ? projectThreads
             : projectThreads.slice(0, THREAD_PREVIEW_LIMIT);
-        const renderedThreads = pinnedCollapsedThread ? [pinnedCollapsedThread] : previewThreads;
-        return renderedThreads.map((thread) =>
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        );
+        return pinnedCollapsedThread ? [pinnedCollapsedThread] : previewThreads;
       }),
     [
       sidebarThreadSortOrder,
@@ -3026,9 +3023,30 @@ export default function Sidebar() {
       threadsByProjectKey,
     ],
   );
+  const visibleSidebarThreadKeys = useMemo(
+    () =>
+      visibleSidebarThreadsInVisualOrder.map((thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      ),
+    [visibleSidebarThreadsInVisualOrder],
+  );
+  const threadJumpThreadKeys = useMemo(
+    () =>
+      selectThreadJumpThreadIds(
+        visibleSidebarThreadsInVisualOrder.map((thread) => ({
+          id: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
+          latestUserMessageAt: thread.latestUserMessageAt,
+        })),
+        sidebarThreadSortOrder,
+        9,
+      ),
+    [sidebarThreadSortOrder, visibleSidebarThreadsInVisualOrder],
+  );
   const threadJumpCommandByKey = useMemo(() => {
     const mapping = new Map<string, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
-    for (const [visibleThreadIndex, threadKey] of visibleSidebarThreadKeys.entries()) {
+    for (const [visibleThreadIndex, threadKey] of threadJumpThreadKeys.entries()) {
       const jumpCommand = threadJumpCommandForIndex(visibleThreadIndex);
       if (!jumpCommand) {
         return mapping;
@@ -3037,11 +3055,7 @@ export default function Sidebar() {
     }
 
     return mapping;
-  }, [visibleSidebarThreadKeys]);
-  const threadJumpThreadKeys = useMemo(
-    () => [...threadJumpCommandByKey.keys()],
-    [threadJumpCommandByKey],
-  );
+  }, [threadJumpThreadKeys]);
   const sidebarShortcutContext = useMemo(
     () => ({
       terminalFocus: false,
