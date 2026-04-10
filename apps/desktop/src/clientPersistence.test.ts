@@ -7,6 +7,7 @@ import {
   type ClientSettings,
   type PersistedSavedEnvironmentRecord,
 } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -49,6 +50,7 @@ function makeSecretStorage(available: boolean): DesktopSecretStorage {
 }
 
 const clientSettings: ClientSettings = {
+  ...DEFAULT_CLIENT_SETTINGS,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   diffWordWrap: true,

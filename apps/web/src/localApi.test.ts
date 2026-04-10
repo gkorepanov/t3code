@@ -12,6 +12,7 @@ import {
   type TerminalEvent,
   ThreadId,
 } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
@@ -34,6 +35,15 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
 const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
 const orchestrationEventListeners = new Set<(event: OrchestrationEvent) => void>();
 const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
+const persistedClientSettings = {
+  ...DEFAULT_CLIENT_SETTINGS,
+  confirmThreadArchive: true,
+  confirmThreadDelete: false,
+  diffWordWrap: true,
+  sidebarProjectSortOrder: "manual" as const,
+  sidebarThreadSortOrder: "created_at" as const,
+  timestampFormat: "24-hour" as const,
+};
 
 const rpcClientMock = {
   dispose: vi.fn(),
@@ -527,14 +537,7 @@ describe("wsApi", () => {
     const api = createLocalApi(rpcClientMock as never);
 
     await api.persistence.getClientSettings();
-    await api.persistence.setClientSettings({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    await api.persistence.setClientSettings(persistedClientSettings);
     await api.persistence.getSavedEnvironmentRegistry();
     await api.persistence.setSavedEnvironmentRegistry([]);
     await api.persistence.getSavedEnvironmentSecret(EnvironmentId.make("environment-local"));
@@ -545,14 +548,7 @@ describe("wsApi", () => {
     await api.persistence.removeSavedEnvironmentSecret(EnvironmentId.make("environment-local"));
 
     expect(getClientSettings).toHaveBeenCalledWith();
-    expect(setClientSettings).toHaveBeenCalledWith({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    expect(setClientSettings).toHaveBeenCalledWith(persistedClientSettings);
     expect(getSavedEnvironmentRegistry).toHaveBeenCalledWith();
     expect(setSavedEnvironmentRegistry).toHaveBeenCalledWith([]);
     expect(getSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local");
@@ -564,14 +560,7 @@ describe("wsApi", () => {
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi(rpcClientMock as never);
 
-    await api.persistence.setClientSettings({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    await api.persistence.setClientSettings(persistedClientSettings);
     await api.persistence.setSavedEnvironmentRegistry([
       {
         environmentId: EnvironmentId.make("environment-local"),
@@ -587,14 +576,7 @@ describe("wsApi", () => {
       "bearer-token",
     );
 
-    await expect(api.persistence.getClientSettings()).resolves.toEqual({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    await expect(api.persistence.getClientSettings()).resolves.toEqual(persistedClientSettings);
     await expect(api.persistence.getSavedEnvironmentRegistry()).resolves.toEqual([
       {
         environmentId: EnvironmentId.make("environment-local"),

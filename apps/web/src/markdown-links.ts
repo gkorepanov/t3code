@@ -6,6 +6,7 @@ const EXTERNAL_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/;
 const RELATIVE_PATH_PREFIX_PATTERN = /^(~\/|\.{1,2}\/)/;
 const RELATIVE_FILE_PATH_PATTERN = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+){0,2}$/;
 const RELATIVE_FILE_NAME_PATTERN = /^[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+(?::\d+){0,2}$/;
+const BROWSER_FILE_ROUTE_PREFIX = "/file";
 const POSITION_SUFFIX_PATTERN = /:\d+(?::\d+)?$/;
 const POSITION_ONLY_PATTERN = /^\d+(?::\d+)?$/;
 const POSIX_FILE_ROOT_PREFIXES = [
@@ -27,6 +28,10 @@ function safeDecode(value: string): string {
   } catch {
     return value;
   }
+}
+
+function normalizeAbsolutePath(value: string): string {
+  return /^\/[A-Za-z]:[\\/]/.test(value) ? value.slice(1) : value;
 }
 
 function stripSearchAndHash(value: string): { path: string; hash: string } {
@@ -123,23 +128,48 @@ export function resolveMarkdownFileLinkTarget(
   const source = fileUrlTarget ?? stripSearchAndHash(rawHref);
   const decodedPath = fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim());
   const decodedHash = safeDecode(source.hash.trim());
+  const normalizedPath = decodedPath.startsWith(`${BROWSER_FILE_ROUTE_PREFIX}/`)
+    ? normalizeAbsolutePath(decodedPath.slice(BROWSER_FILE_ROUTE_PREFIX.length))
+    : decodedPath;
 
-  if (decodedPath.length === 0) return null;
+  if (normalizedPath.length === 0) return null;
   if (
-    !WINDOWS_DRIVE_PATH_PATTERN.test(decodedPath) &&
-    !WINDOWS_UNC_PATH_PATTERN.test(decodedPath) &&
-    hasExternalScheme(decodedPath)
+    !WINDOWS_DRIVE_PATH_PATTERN.test(normalizedPath) &&
+    !WINDOWS_UNC_PATH_PATTERN.test(normalizedPath) &&
+    hasExternalScheme(normalizedPath)
   ) {
     return null;
   }
 
-  if (!isLikelyPathCandidate(decodedPath)) return null;
+  if (!isLikelyPathCandidate(normalizedPath)) return null;
 
-  const pathWithPosition = appendLineColumnFromHash(decodedPath, decodedHash);
+  const pathWithPosition = appendLineColumnFromHash(normalizedPath, decodedHash);
   if (!isRelativePath(pathWithPosition)) {
     return pathWithPosition;
   }
 
   if (!cwd) return null;
   return resolvePathLinkTarget(pathWithPosition, cwd);
+}
+
+export function buildMarkdownRemoteEditorHref(
+  targetPath: string | null | undefined,
+  prefix: string | undefined,
+): string | null {
+  const normalizedPrefix = prefix?.trim();
+  if (!normalizedPrefix || !targetPath) return null;
+
+  const normalizedTargetPath = POSITION_SUFFIX_PATTERN.test(targetPath)
+    ? targetPath
+    : `${targetPath}:0`;
+  const prefixWithSlash = normalizedPrefix.endsWith("/")
+    ? normalizedPrefix
+    : `${normalizedPrefix}/`;
+  const pathWithoutLeadingSlash = normalizedTargetPath.replace(/^\/+/, "");
+  return `${prefixWithSlash}${encodeURI(pathWithoutLeadingSlash)}`;
+}
+
+export function buildMarkdownBrowserFileHref(targetPath: string | null | undefined): string | null {
+  if (!targetPath) return null;
+  return `${BROWSER_FILE_ROUTE_PREFIX}/${encodeURI(targetPath.replace(/^\/+/, ""))}`;
 }
