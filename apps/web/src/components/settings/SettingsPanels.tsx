@@ -78,6 +78,7 @@ import {
   useServerProviders,
 } from "../../rpc/serverState";
 import { formatProviderKindLabel } from "../../providerModels";
+import { BrowserFileLinksSettingsSection } from "./BrowserFileLinksSettingsSection";
 
 const THEME_OPTIONS = [
   {
@@ -475,6 +476,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Task sidebar"]
         : []),
+      ...(settings.browserFileLinkPrefix !== DEFAULT_UNIFIED_SETTINGS.browserFileLinkPrefix
+        ? ["Browser file links"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -501,6 +505,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
+      settings.browserFileLinkPrefix,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.timestampFormat,
@@ -1167,6 +1172,8 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <BrowserFileLinksSettingsSection />
 
       <SettingsSection
         title="Providers"

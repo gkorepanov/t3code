@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveMarkdownFileLinkMeta,
+  buildMarkdownBrowserFileHref,
+  buildMarkdownRemoteEditorHref,
   resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
 } from "./markdown-links";
@@ -86,5 +88,45 @@ describe("resolveMarkdownFileLinkTarget", () => {
 
   it("does not treat app routes as file links", () => {
     expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
+  });
+
+  it("normalizes /file browser routes back to filesystem paths", () => {
+    expect(resolveMarkdownFileLinkTarget("/file/Users/julius/project/src/main.ts:42")).toBe(
+      "/Users/julius/project/src/main.ts:42",
+    );
+  });
+});
+
+describe("buildMarkdownRemoteEditorHref", () => {
+  it("appends a default line suffix when one is missing", () => {
+    expect(
+      buildMarkdownRemoteEditorHref(
+        "/home/julius/project/src/main.ts",
+        "vscode://vscode-remote/ssh-remote+wf-gk",
+      ),
+    ).toBe("vscode://vscode-remote/ssh-remote+wf-gk/home/julius/project/src/main.ts:0");
+  });
+
+  it("preserves existing line information", () => {
+    expect(
+      buildMarkdownRemoteEditorHref(
+        "/home/julius/project/src/main.ts:42:7",
+        "vscode://vscode-remote/ssh-remote+wf-gk/",
+      ),
+    ).toBe("vscode://vscode-remote/ssh-remote+wf-gk/home/julius/project/src/main.ts:42:7");
+  });
+});
+
+describe("buildMarkdownBrowserFileHref", () => {
+  it("prefixes absolute file targets with /file", () => {
+    expect(buildMarkdownBrowserFileHref("/home/julius/project/src/main.ts:42")).toBe(
+      "/file/home/julius/project/src/main.ts:42",
+    );
+  });
+
+  it("encodes spaces without escaping path separators", () => {
+    expect(buildMarkdownBrowserFileHref("/Users/julius/project/file name.md")).toBe(
+      "/file/Users/julius/project/file%20name.md",
+    );
   });
 });

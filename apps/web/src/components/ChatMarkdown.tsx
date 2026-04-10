@@ -22,6 +22,7 @@ import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { openInPreferredEditor } from "../editorPreferences";
+import { useSettings } from "../hooks/useSettings";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
@@ -29,6 +30,10 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
+import {
+  resolveMarkdownFileLinkBehavior,
+  shouldHandleMarkdownFileLinkClick,
+} from "./chatMarkdownLinkBehavior";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -248,6 +253,8 @@ interface MarkdownFileLinkProps {
   filePath: string;
   label: string;
   theme: "light" | "dark";
+  remoteEditorHref: string | null;
+  interceptsPlainClick: boolean;
   className?: string | undefined;
 }
 
@@ -338,9 +345,16 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   filePath,
   label,
   theme,
+  remoteEditorHref,
+  interceptsPlainClick,
   className,
 }: MarkdownFileLinkProps) {
   const handleOpen = useCallback(() => {
+    if (remoteEditorHref) {
+      window.location.assign(remoteEditorHref);
+      return;
+    }
+
     const api = readLocalApi();
     if (!api) {
       toastManager.add({
@@ -359,7 +373,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         }),
       );
     });
-  }, [targetPath]);
+  }, [remoteEditorHref, targetPath]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -433,6 +447,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             href={href}
             className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, className)}
             onClick={(event) => {
+              if (!shouldHandleMarkdownFileLinkClick(event)) return;
+              if (!interceptsPlainClick) return;
               event.preventDefault();
               event.stopPropagation();
               handleOpen();
@@ -472,11 +488,16 @@ function areMarkdownFileLinkPropsEqual(
     previous.filePath === next.filePath &&
     previous.label === next.label &&
     previous.theme === next.theme &&
+    previous.remoteEditorHref === next.remoteEditorHref &&
+    previous.interceptsPlainClick === next.interceptsPlainClick &&
     previous.className === next.className
   );
 }
 
 function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+  const settings = useSettings();
+  const browserFileLinkPrefix = settings.browserFileLinkPrefix;
+  const localApi = readLocalApi();
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
@@ -506,6 +527,13 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
       a({ node: _node, href, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
+        const linkBehavior = resolveMarkdownFileLinkBehavior({
+          browserFileLinkPrefix,
+          cwd,
+          hasNativeApi: localApi != null,
+          href: normalizedHref,
+        });
+
         if (!fileLinkMeta) {
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
@@ -523,12 +551,14 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
 
         return (
           <MarkdownFileLink
-            href={href ?? fileLinkMeta.targetPath}
+            href={linkBehavior.browserHref ?? href ?? fileLinkMeta.targetPath}
             targetPath={fileLinkMeta.targetPath}
             displayPath={fileLinkMeta.displayPath}
             filePath={fileLinkMeta.filePath}
             label={labelParts.join(" · ")}
             theme={resolvedTheme}
+            remoteEditorHref={linkBehavior.remoteEditorHref}
+            interceptsPlainClick={linkBehavior.interceptsPlainClick}
             className={props.className}
           />
         );
@@ -560,6 +590,9 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
       fileLinkParentSuffixByPath,
       isStreaming,
       markdownFileLinkMetaByHref,
+      browserFileLinkPrefix,
+      cwd,
+      localApi,
       resolvedTheme,
     ],
   );

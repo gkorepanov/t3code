@@ -24,6 +24,7 @@ import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolve
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { matchAbsoluteFileRoute } from "./absoluteFileRoute";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
@@ -229,6 +230,38 @@ export const staticAndDevRouteLayer = HttpRouter.add(
 
     if (Option.isNone(url)) {
       return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+
+    const absoluteFileRoute = matchAbsoluteFileRoute(url.value.pathname, request.method);
+    if (absoluteFileRoute.kind === "invalid") {
+      return HttpServerResponse.text("Invalid file path", { status: 400 });
+    }
+    if (absoluteFileRoute.kind === "matched") {
+      return yield* requireAuthenticatedRequest.pipe(
+        Effect.andThen(
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem;
+            const fileInfo = yield* fileSystem
+              .stat(absoluteFileRoute.filePath)
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+            if (!fileInfo || fileInfo.type !== "File") {
+              return HttpServerResponse.text("Not Found", { status: 404 });
+            }
+
+            return yield* HttpServerResponse.file(absoluteFileRoute.filePath, {
+              status: 200,
+              headers: {
+                "Cache-Control": "no-store",
+              },
+            }).pipe(
+              Effect.catch(() =>
+                Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
+              ),
+            );
+          }),
+        ),
+        Effect.catchTag("AuthError", respondToAuthError),
+      );
     }
 
     const config = yield* ServerConfig;
