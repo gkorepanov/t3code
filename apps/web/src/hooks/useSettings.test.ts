@@ -6,11 +6,13 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     expect(
       buildLegacyClientSettingsMigrationPatch({
         browserFileLinkPrefix: "vscode://vscode-remote/ssh-remote+wf-gk/",
+        requireMetaEnterToSend: true,
         confirmThreadArchive: true,
         confirmThreadDelete: false,
       }),
     ).toEqual({
       browserFileLinkPrefix: "vscode://vscode-remote/ssh-remote+wf-gk/",
+      requireMetaEnterToSend: true,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
     });

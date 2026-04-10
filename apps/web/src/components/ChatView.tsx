@@ -79,6 +79,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { basenameOfPath } from "../vscode-icons";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import BranchToolbar from "./BranchToolbar";
@@ -155,11 +156,16 @@ import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu"
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
+import { RunningStopButton } from "./chat/RunningStopButton";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./chat/composerProviderRegistry";
+import {
+  resolveRunningComposerControls,
+  shouldSubmitComposerOnEnter,
+} from "./chat/composerSubmitBehavior";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
@@ -253,6 +259,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const settings = useSettings();
+  const requireMetaEnterToSend = settings.requireMetaEnterToSend;
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -263,6 +270,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     select: (params) => parseDiffRouteSearch(params),
   });
   const { resolvedTheme } = useTheme();
+  const isCoarsePointer = useMediaQuery("(pointer: coarse)");
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
   const composerDraft = useComposerThreadDraft(threadId);
@@ -723,6 +731,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activePendingIsResponding = activePendingUserInput
     ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
+  const { showInlineRunningStopButton, showSeparateRunningStopButton } =
+    resolveRunningComposerControls({
+      hasPendingProgress: activePendingProgress !== null,
+      isCoarsePointer,
+      pendingUserInputCount: pendingUserInputs.length,
+      phase,
+    });
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -3504,7 +3519,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     }
 
-    if (key === "Enter" && !event.shiftKey) {
+    if (
+      shouldSubmitComposerOnEnter({
+        ctrlKey: event.ctrlKey,
+        key,
+        metaKey: event.metaKey,
+        requireMetaEnterToSend,
+        shiftKey: event.shiftKey,
+      })
+    ) {
       void onSend();
       return true;
     }
@@ -4047,23 +4070,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   : "Next question"}
                             </Button>
                           </div>
-                        ) : phase === "running" ? (
-                          <button
-                            type="button"
-                            className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-                            onClick={() => void onInterrupt()}
-                            aria-label="Stop generation"
-                          >
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 12 12"
-                              fill="currentColor"
-                              aria-hidden="true"
-                            >
-                              <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                            </svg>
-                          </button>
+                        ) : showInlineRunningStopButton ? (
+                          <RunningStopButton onClick={() => void onInterrupt()} />
                         ) : pendingUserInputs.length === 0 ? (
                           showPlanFollowUpPrompt ? (
                             prompt.trim().length > 0 ? (
@@ -4167,6 +4175,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           )
                         ) : null}
                       </div>
+                      {showSeparateRunningStopButton ? (
+                        <RunningStopButton onClick={() => void onInterrupt()} />
+                      ) : null}
                     </div>
                   )}
                 </div>

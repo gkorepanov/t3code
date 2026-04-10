@@ -206,6 +206,10 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.browserFileLinkPrefix = legacySettings.browserFileLinkPrefix;
   }
 
+  if (Predicate.isBoolean(legacySettings.requireMetaEnterToSend)) {
+    patch.requireMetaEnterToSend = legacySettings.requireMetaEnterToSend;
+  }
+
   if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {
     patch.confirmThreadArchive = legacySettings.confirmThreadArchive;
   }
