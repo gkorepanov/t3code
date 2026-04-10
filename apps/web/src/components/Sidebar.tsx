@@ -117,6 +117,7 @@ import {
   sortThreadsForSidebar,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { selectThreadJumpThreadIds } from "./sidebar/threadJumpTargets";
 import { useSidebarThreadNavigation } from "./sidebar/useSidebarThreadNavigation";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
@@ -1046,21 +1047,25 @@ export default function Sidebar() {
   );
   const threadJumpCommandById = useMemo(() => {
     const mapping = new Map<ThreadId, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
-    let visibleThreadIndex = 0;
+    const renderedThreadsInVisualOrder = renderedProjects.flatMap(
+      (renderedProject) => renderedProject.renderedThreads,
+    );
+    const threadJumpThreadIds = selectThreadJumpThreadIds(
+      renderedThreadsInVisualOrder,
+      appSettings.sidebarThreadSortOrder,
+      9,
+    );
 
-    for (const renderedProject of renderedProjects) {
-      for (const thread of renderedProject.renderedThreads) {
-        const jumpCommand = threadJumpCommandForIndex(visibleThreadIndex);
-        if (!jumpCommand) {
-          return mapping;
-        }
-        mapping.set(thread.id, jumpCommand);
-        visibleThreadIndex += 1;
+    threadJumpThreadIds.forEach((threadId, index) => {
+      const jumpCommand = threadJumpCommandForIndex(index);
+      if (!jumpCommand) {
+        return;
       }
-    }
+      mapping.set(threadId, jumpCommand);
+    });
 
     return mapping;
-  }, [renderedProjects]);
+  }, [appSettings.sidebarThreadSortOrder, renderedProjects]);
   const threadJumpThreadIds = useMemo(
     () => [...threadJumpCommandById.keys()],
     [threadJumpCommandById],
