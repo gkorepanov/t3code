@@ -59,6 +59,7 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { BrowserFileLinksSettingsSection } from "./BrowserFileLinksSettingsSection";
 
 const THEME_OPTIONS = [
   {
@@ -462,6 +463,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
+      ...(settings.browserFileLinkPrefix !== DEFAULT_UNIFIED_SETTINGS.browserFileLinkPrefix
+        ? ["Browser file links"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -483,6 +487,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.defaultThreadEnvMode,
+      settings.browserFileLinkPrefix,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.timestampFormat,
@@ -1028,6 +1033,8 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <BrowserFileLinksSettingsSection />
 
       <SettingsSection
         title="Providers"

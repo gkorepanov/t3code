@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveMarkdownFileLinkTarget } from "./markdown-links";
+import { buildMarkdownRemoteEditorHref, resolveMarkdownFileLinkTarget } from "./markdown-links";
 
 describe("resolveMarkdownFileLinkTarget", () => {
   it("resolves absolute posix file paths", () => {
@@ -45,5 +45,25 @@ describe("resolveMarkdownFileLinkTarget", () => {
 
   it("does not treat app routes as file links", () => {
     expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
+  });
+});
+
+describe("buildMarkdownRemoteEditorHref", () => {
+  it("appends a default line suffix when one is missing", () => {
+    expect(
+      buildMarkdownRemoteEditorHref(
+        "/home/julius/project/src/main.ts",
+        "vscode://vscode-remote/ssh-remote+wf-gk",
+      ),
+    ).toBe("vscode://vscode-remote/ssh-remote+wf-gk/home/julius/project/src/main.ts:0");
+  });
+
+  it("preserves existing line information", () => {
+    expect(
+      buildMarkdownRemoteEditorHref(
+        "/home/julius/project/src/main.ts:42:7",
+        "vscode://vscode-remote/ssh-remote+wf-gk/",
+      ),
+    ).toBe("vscode://vscode-remote/ssh-remote+wf-gk/home/julius/project/src/main.ts:42:7");
   });
 });

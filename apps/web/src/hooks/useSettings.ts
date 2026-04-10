@@ -202,6 +202,10 @@ export function buildLegacyClientSettingsMigrationPatch(
 ): Partial<DeepMutable<ClientSettings>> {
   const patch: Partial<DeepMutable<ClientSettings>> = {};
 
+  if (Predicate.isString(legacySettings.browserFileLinkPrefix)) {
+    patch.browserFileLinkPrefix = legacySettings.browserFileLinkPrefix;
+  }
+
   if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {
     patch.confirmThreadArchive = legacySettings.confirmThreadArchive;
   }

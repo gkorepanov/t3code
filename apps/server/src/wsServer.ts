@@ -62,6 +62,7 @@ import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
+import { matchAbsoluteFileRoute, serveAbsoluteFileRoute } from "./absoluteFileRoute";
 import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
@@ -441,6 +442,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return;
         }
 
+        const absoluteFileRoute = matchAbsoluteFileRoute(url.pathname, req.method);
+        if (absoluteFileRoute.kind === "invalid") {
+          respond(400, { "Content-Type": "text/plain" }, "Invalid file path");
+          return;
+        }
+
         if (url.pathname.startsWith(ATTACHMENTS_ROUTE_PREFIX)) {
           const rawRelativePath = url.pathname.slice(ATTACHMENTS_ROUTE_PREFIX.length);
           const normalizedRelativePath = normalizeAttachmentRelativePath(rawRelativePath);
@@ -498,6 +505,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           if (!res.writableEnded) {
             res.end();
           }
+          return;
+        }
+
+        if (
+          yield* serveAbsoluteFileRoute(absoluteFileRoute, {
+            fileSystem,
+            method: req.method,
+            res,
+            respond,
+          })
+        ) {
           return;
         }
 

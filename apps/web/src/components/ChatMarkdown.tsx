@@ -17,12 +17,16 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openInPreferredEditor } from "../editorPreferences";
+import { useSettings } from "../hooks/useSettings";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
-import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import {
+  resolveMarkdownFileLinkBehavior,
+  shouldHandleMarkdownFileLinkClick,
+} from "./chatMarkdownLinkBehavior";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -236,12 +240,21 @@ function SuspenseShikiCodeBlock({
 }
 
 function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+  const settings = useSettings();
+  const browserFileLinkPrefix = settings.browserFileLinkPrefix;
+  const nativeApi = readNativeApi();
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
-        const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
+        const linkBehavior = resolveMarkdownFileLinkBehavior({
+          browserFileLinkPrefix,
+          cwd,
+          hasNativeApi: nativeApi != null,
+          href,
+        });
+        const targetPath = linkBehavior.targetPath;
         if (!targetPath) {
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
@@ -249,16 +262,19 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         return (
           <a
             {...props}
-            href={href}
+            href={linkBehavior.browserHref}
             onClick={(event) => {
+              if (!shouldHandleMarkdownFileLinkClick(event)) return;
+              if (linkBehavior.remoteEditorHref) {
+                event.preventDefault();
+                event.stopPropagation();
+                window.location.assign(linkBehavior.remoteEditorHref);
+                return;
+              }
+              if (!nativeApi) return;
               event.preventDefault();
               event.stopPropagation();
-              const api = readNativeApi();
-              if (api) {
-                void openInPreferredEditor(api, targetPath);
-              } else {
-                console.warn("Native API not found. Unable to open file in editor.");
-              }
+              void openInPreferredEditor(nativeApi, targetPath);
             }}
           />
         );
@@ -285,7 +301,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [browserFileLinkPrefix, cwd, diffThemeName, isStreaming, nativeApi],
   );
 
   return (

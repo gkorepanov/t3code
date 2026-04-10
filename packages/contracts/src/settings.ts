@@ -24,6 +24,9 @@ export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
 export const ClientSettingsSchema = Schema.Struct({
+  browserFileLinkPrefix: Schema.String.check(Schema.isMaxLength(4096)).pipe(
+    Schema.withDecodingDefault(() => ""),
+  ),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
