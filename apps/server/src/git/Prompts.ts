@@ -183,11 +183,13 @@ export interface ThreadTitlePromptInput {
 
 export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   const prompt = buildPromptFromMessage({
-    instruction: "You write concise thread titles for coding conversations.",
+    instruction:
+      "You write concise thread titles for coding conversations that always start with an emoji.",
     responseShape: "Return a JSON object with key: title.",
     rules: [
       "Title should summarize the user's request, not restate it verbatim.",
-      "Keep it short and specific (3-8 words).",
+      "Start with exactly one relevant emoji followed by a space.",
+      "Keep it short and specific (3-8 words after the emoji).",
       "Avoid quotes, filler, prefixes, and trailing punctuation.",
       "If images are attached, use them as primary context for visual/UI issues.",
     ],

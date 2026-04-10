@@ -8,6 +8,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { normalizeModelSlug, resolveContextWindow, resolveEffort } from "@t3tools/shared/model";
+import { DEFAULT_FAST_MODE_BY_PROVIDER } from "./providerDefaults";
 
 const EMPTY_CAPABILITIES: ModelCapabilities = {
   reasoningEffortLevels: [],
@@ -75,12 +76,14 @@ export function normalizeCodexModelOptionsWithCapabilities(
   modelOptions: CodexModelOptions | null | undefined,
 ): CodexModelOptions | undefined {
   const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
-  const fastModeEnabled = modelOptions?.fastMode === true;
+  const fastModeEnabled = caps.supportsFastMode
+    ? (modelOptions?.fastMode ?? DEFAULT_FAST_MODE_BY_PROVIDER.codex)
+    : undefined;
   const nextOptions: CodexModelOptions = {
     ...(reasoningEffort
       ? { reasoningEffort: reasoningEffort as CodexModelOptions["reasoningEffort"] }
       : {}),
-    ...(fastModeEnabled ? { fastMode: true } : {}),
+    ...(fastModeEnabled === undefined ? {} : { fastMode: fastModeEnabled }),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
