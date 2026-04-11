@@ -110,6 +110,10 @@ describe("buildThreadTitlePrompt", () => {
       message: "Investigate reconnect regressions after session restore",
     });
 
+    expect(result.prompt).toContain(
+      "You write concise thread titles for coding conversations that always start with an emoji.",
+    );
+    expect(result.prompt).toContain("Start with exactly one relevant emoji followed by a space.");
     expect(result.prompt).toContain("User message:");
     expect(result.prompt).toContain("Investigate reconnect regressions after session restore");
     expect(result.prompt).not.toContain("Attachment metadata:");
