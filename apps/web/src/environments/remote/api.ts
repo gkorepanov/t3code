@@ -56,6 +56,7 @@ async function fetchRemoteJson<T>(input: {
   try {
     response = await fetch(requestUrl, {
       method: input.method ?? "GET",
+      credentials: "include",
       headers: {
         ...(input.body !== undefined ? { "content-type": "application/json" } : {}),
         ...(input.bearerToken ? { authorization: `Bearer ${input.bearerToken}` } : {}),

@@ -1083,8 +1083,23 @@ export async function addSavedEnvironment(input: {
     ...(input.host !== undefined ? { host: input.host } : {}),
     ...(input.pairingCode !== undefined ? { pairingCode: input.pairingCode } : {}),
   });
-  const descriptor = await fetchRemoteEnvironmentDescriptor({
-    httpBaseUrl: resolvedTarget.httpBaseUrl,
+  const fetchDescriptor = () =>
+    fetchRemoteEnvironmentDescriptor({
+      httpBaseUrl: resolvedTarget.httpBaseUrl,
+    });
+  const descriptor = await fetchDescriptor().catch(async (error) => {
+    if (
+      !window.desktopBridge?.openAuthWindow ||
+      !(error instanceof Error) ||
+      !error.message.includes("Failed to fetch remote auth endpoint")
+    ) {
+      throw error;
+    }
+    const opened = await window.desktopBridge.openAuthWindow(resolvedTarget.httpBaseUrl);
+    if (!opened) {
+      throw error;
+    }
+    return fetchDescriptor();
   });
   const environmentId = descriptor.environmentId;
 
