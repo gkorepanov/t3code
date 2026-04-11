@@ -80,7 +80,6 @@ import { useGitStatus } from "../lib/gitStatusState";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-
 import { useThreadActions } from "../hooks/useThreadActions";
 import {
   buildThreadRouteParams,
@@ -116,6 +115,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
@@ -2338,7 +2338,7 @@ export default function Sidebar() {
   const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
   const defaultThreadEnvMode = useSettings((s) => s.defaultThreadEnvMode);
   const { updateSettings } = useUpdateSettings();
-  const { handleNewThread } = useNewThreadHandler();
+  const { handleNewThread: baseHandleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
   const routeThreadRef = useParams({
     strict: false,
@@ -2363,6 +2363,7 @@ export default function Sidebar() {
   const selectedThreadCount = useThreadSelectionStore((s) => s.selectedThreadKeys.size);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
+  const { isMobile, setOpenMobile } = useSidebar();
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
@@ -2529,6 +2530,34 @@ export default function Sidebar() {
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.newLocal", newThreadShortcutLabelOptions) ??
     shortcutLabelForCommand(keybindings, "chat.new", newThreadShortcutLabelOptions);
+  const closeMobileSidebar = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+
+  const handleNewThread = useCallback(
+    async (...args: Parameters<typeof baseHandleNewThread>) => {
+      await baseHandleNewThread(...args);
+      closeMobileSidebar();
+    },
+    [baseHandleNewThread, closeMobileSidebar],
+  );
+
+  const navigateToThread = useCallback(
+    (threadRef: ScopedThreadRef) => {
+      if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
+        clearSelection();
+      }
+      setSelectionAnchor(scopedThreadKey(threadRef));
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(threadRef),
+      }).then(() => closeMobileSidebar());
+    },
+    [clearSelection, closeMobileSidebar, navigate, setSelectionAnchor],
+  );
+
   const focusMostRecentThreadForProject = useCallback(
     (projectRef: { environmentId: EnvironmentId; projectId: ProjectId }) => {
       const physicalKey = scopedProjectKey(
@@ -2541,12 +2570,9 @@ export default function Sidebar() {
       )[0];
       if (!latestThread) return;
 
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(latestThread.environmentId, latestThread.id)),
-      });
+      navigateToThread(scopeThreadRef(latestThread.environmentId, latestThread.id));
     },
-    [sidebarThreadSortOrder, navigate, threadsByProjectKey, physicalToLogicalKey],
+    [navigateToThread, physicalToLogicalKey, sidebarThreadSortOrder, threadsByProjectKey],
   );
 
   const addProjectFromPath = useCallback(
@@ -2656,19 +2682,6 @@ export default function Sidebar() {
     setAddingProject((prev) => !prev);
   };
 
-  const navigateToThread = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
-        clearSelection();
-      }
-      setSelectionAnchor(scopedThreadKey(threadRef));
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(threadRef),
-      });
-    },
-    [clearSelection, navigate, setSelectionAnchor],
-  );
 
   const projectDnDSensors = useSensors(
     useSensor(PointerSensor, {

@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { useMobileViewportLock } from "../hooks/useMobileViewportLock";
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 
@@ -10,6 +11,7 @@ const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const mobileViewportStyle = useMobileViewportLock();
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -28,7 +30,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider
+      defaultOpen
+      className="h-dvh min-h-0 overflow-hidden overscroll-none"
+      style={mobileViewportStyle}
+    >
       <Sidebar
         side="left"
         collapsible="offcanvas"
