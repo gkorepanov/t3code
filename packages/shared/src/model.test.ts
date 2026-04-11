@@ -25,15 +25,16 @@ const codexCaps: ModelCapabilities = createModelCapabilities({
       label: "Reasoning",
       type: "select",
       options: [
-        { id: "xhigh", label: "Extra High" },
-        { id: "high", label: "High", isDefault: true },
+        { id: "xhigh", label: "Extra High", isDefault: true },
+        { id: "high", label: "High" },
       ],
-      currentValue: "high",
+      currentValue: "xhigh",
     },
     {
       id: "fastMode",
       label: "Fast Mode",
       type: "boolean",
+      currentValue: true,
     },
   ],
 });
@@ -212,5 +213,15 @@ describe("descriptor helpers", () => {
     ).toBeUndefined();
     expect(getModelSelectionStringOptionValue(selection, "reasoningEffort")).toBe("high");
     expect(getModelSelectionBooleanOptionValue(selection, "fastMode")).toBe(true);
+  });
+
+  it("keeps Codex xhigh and fast defaults in descriptor selections", () => {
+    const descriptors = getProviderOptionDescriptors({ caps: codexCaps });
+    expect(
+      buildProviderOptionSelectionsFromDescriptors(descriptors),
+    ).toEqual([
+      { id: "reasoningEffort", value: "xhigh" },
+      { id: "fastMode", value: true },
+    ]);
   });
 });

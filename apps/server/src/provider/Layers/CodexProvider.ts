@@ -93,8 +93,13 @@ function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["accoun
 function mapCodexModelCapabilities(
   model: CodexSchema.V2ModelListResponse__Model,
 ): ModelCapabilities {
+  const defaultReasoningEffort = model.supportedReasoningEfforts.some(
+    ({ reasoningEffort }) => reasoningEffort === "xhigh",
+  )
+    ? "xhigh"
+    : model.defaultReasoningEffort;
   const reasoningOptions = model.supportedReasoningEfforts.map(({ reasoningEffort }) =>
-    reasoningEffort === model.defaultReasoningEffort
+    reasoningEffort === defaultReasoningEffort
       ? {
           id: reasoningEffort,
           label: REASONING_EFFORT_LABELS[reasoningEffort],
@@ -126,6 +131,7 @@ function mapCodexModelCapabilities(
               id: "fastMode",
               label: "Fast Mode",
               type: "boolean" as const,
+              currentValue: true,
             },
           ]
         : []),
