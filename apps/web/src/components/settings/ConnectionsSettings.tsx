@@ -1229,7 +1229,7 @@ export function ConnectionsSettings() {
             )}
           </SettingsSection>
 
-          {isLocalBackendNetworkAccessible ? (
+          {!desktopBridge || isLocalBackendNetworkAccessible ? (
             <SettingsSection
               title="Authorized clients"
               headerAction={
