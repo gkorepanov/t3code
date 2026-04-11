@@ -958,7 +958,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         : STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN,
   });
 
-  const refreshStatusUpstreamIfStale = Effect.fn("refreshStatusUpstreamIfStale")(function* (
+  const _refreshStatusUpstreamIfStale = Effect.fn("refreshStatusUpstreamIfStale")(function* (
     cwd: string,
   ) {
     const upstream = yield* resolveCurrentUpstream(cwd);
@@ -1340,10 +1340,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   );
 
   const statusDetails: GitCoreShape["statusDetails"] = Effect.fn("statusDetails")(function* (cwd) {
-    yield* refreshStatusUpstreamIfStale(cwd).pipe(
-      Effect.catchIf(isMissingGitCwdError, () => Effect.void),
-      Effect.ignoreCause({ log: true }),
-    );
+    // Keep status polling fully local; do not background-fetch remote refs here.
     return yield* readStatusDetailsLocal(cwd);
   });
 
