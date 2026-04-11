@@ -361,7 +361,7 @@ describe("GeneralSettingsPanel observability", () => {
     authAccessHarness.reset();
   });
 
-  it("hides owner pairing tools in browser-served loopback builds without remote exposure", async () => {
+  it("shows owner pairing tools in browser-served loopback builds without remote exposure", async () => {
     Reflect.deleteProperty(window, "desktopBridge");
     authAccessHarness.setSnapshot({
       pairingLinks: [],
@@ -422,8 +422,11 @@ describe("GeneralSettingsPanel observability", () => {
         ),
       )
       .toBeInTheDocument();
-    await expect.element(page.getByText("Authorized clients")).not.toBeInTheDocument();
-    await expect.element(page.getByText("Chrome on Mac")).not.toBeInTheDocument();
+    await expect.element(page.getByText("Authorized clients")).toBeInTheDocument();
+    await expect.element(page.getByText("Chrome on Mac")).toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Create link", exact: true }))
+      .toBeInTheDocument();
     await expect
       .element(page.getByRole("heading", { name: "Remote environments", exact: true }))
       .toBeInTheDocument();
