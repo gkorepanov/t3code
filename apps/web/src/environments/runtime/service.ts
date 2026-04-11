@@ -28,7 +28,7 @@ import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { projectQueryKeys } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
-import { getPrimaryKnownEnvironment } from "../primary";
+import { getPrimaryKnownEnvironment, resolvePrimaryEnvironmentHttpUrl } from "../primary";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
@@ -491,6 +491,18 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+async function fetchOrchestrationShellSnapshot(
+  url: string,
+  bearerToken?: string,
+): Promise<OrchestrationShellSnapshot> {
+  const response = await fetch(url, {
+    credentials: "include",
+    headers: bearerToken ? { authorization: `Bearer ${bearerToken}` } : {},
+  });
+  if (!response.ok) throw new Error(`Failed to load orchestration snapshot (${response.status}).`);
+  return (await response.json()) as OrchestrationShellSnapshot;
+}
+
 function setRuntimeConnecting(environmentId: EnvironmentId) {
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "connecting",
@@ -900,6 +912,10 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
+      loadSnapshot: () =>
+        fetchOrchestrationShellSnapshot(
+          resolvePrimaryEnvironmentHttpUrl("/api/orchestration/shell-snapshot"),
+        ),
       ...createEnvironmentConnectionHandlers(),
     }),
   );
@@ -949,6 +965,11 @@ async function ensureSavedEnvironmentConnection(
       environmentId: record.environmentId,
     },
     client,
+    loadSnapshot: () =>
+      fetchOrchestrationShellSnapshot(
+        new URL("/api/orchestration/shell-snapshot", record.httpBaseUrl).toString(),
+        bearerToken,
+      ),
     refreshMetadata: async () => {
       await refreshSavedEnvironmentMetadata(record, bearerToken, client);
     },

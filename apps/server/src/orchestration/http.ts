@@ -3,6 +3,7 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationGetSnapshotError,
   type OrchestrationReadModel,
+  type OrchestrationShellSnapshot,
 } from "@t3tools/contracts";
 import { Effect } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -55,6 +56,30 @@ export const orchestrationSnapshotRouteLayer = HttpRouter.add(
       ),
     );
     return HttpServerResponse.jsonUnsafe(snapshot satisfies OrchestrationReadModel, {
+      status: 200,
+    });
+  }).pipe(
+    Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError),
+    Effect.catchTag("OrchestrationGetSnapshotError", respondToOrchestrationHttpError),
+  ),
+);
+
+export const orchestrationShellSnapshotRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/orchestration/shell-snapshot",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+      Effect.mapError(
+        (cause) =>
+          new OrchestrationGetSnapshotError({
+            message: "Failed to load orchestration shell snapshot.",
+            cause,
+          }),
+      ),
+    );
+    return HttpServerResponse.jsonUnsafe(snapshot satisfies OrchestrationShellSnapshot, {
       status: 200,
     });
   }).pipe(

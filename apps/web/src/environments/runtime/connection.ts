@@ -36,6 +36,7 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly kind: "primary" | "saved";
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
+  readonly loadSnapshot?: () => Promise<OrchestrationShellSnapshot>;
   readonly refreshMetadata?: () => Promise<void>;
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
@@ -83,6 +84,8 @@ export function createEnvironmentConnection(
 
   let disposed = false;
   const bootstrapGate = createBootstrapGate();
+  let bootstrapGeneration = 0;
+  let bootstrapSnapshotLoadPromise: Promise<void> | null = null;
 
   const observeEnvironmentIdentity = (nextEnvironmentId: EnvironmentId, source: string) => {
     if (environmentId !== nextEnvironmentId) {
@@ -90,6 +93,35 @@ export function createEnvironmentConnection(
         `Environment connection ${environmentId} changed identity to ${nextEnvironmentId} via ${source}.`,
       );
     }
+  };
+
+  const startBootstrapSnapshotLoad = () => {
+    if (!input.loadSnapshot || bootstrapSnapshotLoadPromise) {
+      return;
+    }
+    const generation = bootstrapGeneration;
+    bootstrapSnapshotLoadPromise = input
+      .loadSnapshot()
+      .then((snapshot) => {
+        if (disposed || generation !== bootstrapGeneration) {
+          return;
+        }
+        input.syncShellSnapshot(snapshot, environmentId);
+        bootstrapGate.resolve();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (generation === bootstrapGeneration) {
+          bootstrapSnapshotLoadPromise = null;
+        }
+      });
+  };
+
+  const resetBootstrap = () => {
+    bootstrapGeneration += 1;
+    bootstrapSnapshotLoadPromise = null;
+    bootstrapGate.reset();
+    startBootstrapSnapshotLoad();
   };
 
   const unsubLifecycle = input.client.server.subscribeLifecycle(
@@ -129,7 +161,7 @@ export function createEnvironmentConnection(
         if (disposed) {
           return;
         }
-        bootstrapGate.reset();
+        resetBootstrap();
       },
     },
   );
@@ -148,17 +180,23 @@ export function createEnvironmentConnection(
     unsubConfig();
   };
 
+  startBootstrapSnapshotLoad();
+
   return {
     kind: input.kind,
     environmentId,
     knownEnvironment: input.knownEnvironment,
     client: input.client,
-    ensureBootstrapped: () => bootstrapGate.wait(),
+    ensureBootstrapped: () => {
+      startBootstrapSnapshotLoad();
+      return bootstrapGate.wait();
+    },
     reconnect: async () => {
-      bootstrapGate.reset();
+      resetBootstrap();
       try {
         await input.client.reconnect();
         await input.refreshMetadata?.();
+        startBootstrapSnapshotLoad();
         await bootstrapGate.wait();
       } catch (error) {
         bootstrapGate.reject(error);
