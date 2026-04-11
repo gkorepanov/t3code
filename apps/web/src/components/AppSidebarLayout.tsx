@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { useMobileViewportLock } from "../hooks/useMobileViewportLock";
+import { SidebarShortcutHandler } from "./sidebar/SidebarShortcutHandler";
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 
@@ -35,6 +36,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       className="h-dvh min-h-0 overflow-hidden overscroll-none"
       style={mobileViewportStyle}
     >
+      <SidebarShortcutHandler />
       <Sidebar
         side="left"
         collapsible="offcanvas"
