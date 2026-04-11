@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { CheckpointRef, EventId, MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
@@ -565,10 +569,35 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       }),
   );
 
+  it.effect("drops missing worktree paths from snapshot threads", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const missingWorktreePath = mkdtempSync(path.join(tmpdir(), "t3-missing-worktree-"));
+      rmSync(missingWorktreePath, { recursive: true, force: true });
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+
+      yield* sql`
+        INSERT INTO projection_projects (project_id, title, workspace_root, default_model_selection_json, scripts_json, created_at, updated_at, deleted_at)
+        VALUES ('project-1', 'Project 1', '/tmp/project-1', '{"provider":"codex","model":"gpt-5-codex"}', '[]', '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, branch, worktree_path, latest_turn_id, created_at, updated_at, archived_at, deleted_at)
+        VALUES ('thread-1', 'project-1', 'Thread 1', '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default', 'feature/a', ${missingWorktreePath}, NULL, '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL, NULL)
+      `;
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      assert.equal(snapshot.threads[0]?.worktreePath, null);
+    }),
+  );
+
   it.effect("reads single-thread checkpoint context without hydrating unrelated threads", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
+      const worktreePath = mkdtempSync(path.join(tmpdir(), "t3-context-worktree-"));
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
@@ -621,7 +650,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'full-access',
           'default',
           'feature/perf',
-          '/tmp/context-worktree',
+          ${worktreePath},
           NULL,
           '2026-03-02T00:00:02.000Z',
           '2026-03-02T00:00:03.000Z',
@@ -691,7 +720,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           threadId: ThreadId.make("thread-context"),
           projectId: asProjectId("project-context"),
           workspaceRoot: "/tmp/context-workspace",
-          worktreePath: "/tmp/context-worktree",
+          worktreePath,
           checkpoints: [
             {
               turnId: asTurnId("turn-1"),

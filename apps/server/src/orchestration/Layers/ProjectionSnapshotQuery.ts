@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import {
   ChatAttachment,
   IsoDateTime,
@@ -217,6 +219,9 @@ function mapProjectShellRow(
     updatedAt: row.updatedAt,
   };
 }
+
+const sanitizeWorktreePath = (worktreePath: string | null): string | null =>
+  worktreePath && !existsSync(worktreePath) ? null : worktreePath;
 
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): ProjectionRepositoryError =>
@@ -917,7 +922,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 runtimeMode: row.runtimeMode,
                 interactionMode: row.interactionMode,
                 branch: row.branch,
-                worktreePath: row.worktreePath,
+                worktreePath: sanitizeWorktreePath(row.worktreePath),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -1059,7 +1064,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     runtimeMode: row.runtimeMode,
                     interactionMode: row.interactionMode,
                     branch: row.branch,
-                    worktreePath: row.worktreePath,
+                    worktreePath: sanitizeWorktreePath(row.worktreePath),
                     latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                     createdAt: row.createdAt,
                     updatedAt: row.updatedAt,
@@ -1199,7 +1204,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         threadId: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
         workspaceRoot: threadRow.value.workspaceRoot,
-        worktreePath: threadRow.value.worktreePath,
+        worktreePath: sanitizeWorktreePath(threadRow.value.worktreePath),
         checkpoints: checkpointRows.map(
           (row): OrchestrationCheckpointSummary => ({
             turnId: row.turnId,
@@ -1255,7 +1260,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         runtimeMode: threadRow.value.runtimeMode,
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
-        worktreePath: threadRow.value.worktreePath,
+        worktreePath: sanitizeWorktreePath(threadRow.value.worktreePath),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -1349,7 +1354,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         runtimeMode: threadRow.value.runtimeMode,
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
-        worktreePath: threadRow.value.worktreePath,
+        worktreePath: sanitizeWorktreePath(threadRow.value.worktreePath),
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
