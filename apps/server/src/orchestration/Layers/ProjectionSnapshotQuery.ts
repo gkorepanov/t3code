@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import {
   ChatAttachment,
   IsoDateTime,
@@ -154,6 +156,9 @@ function computeSnapshotSequence(
 
   return Number.isFinite(minSequence) ? minSequence : 0;
 }
+
+const sanitizeWorktreePath = (worktreePath: string | null): string | null =>
+  worktreePath && !existsSync(worktreePath) ? null : worktreePath;
 
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): ProjectionRepositoryError =>
@@ -689,7 +694,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 runtimeMode: row.runtimeMode,
                 interactionMode: row.interactionMode,
                 branch: row.branch,
-                worktreePath: row.worktreePath,
+                worktreePath: sanitizeWorktreePath(row.worktreePath),
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -811,7 +816,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         threadId: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
         workspaceRoot: threadRow.value.workspaceRoot,
-        worktreePath: threadRow.value.worktreePath,
+        worktreePath: sanitizeWorktreePath(threadRow.value.worktreePath),
         checkpoints: checkpointRows.map(
           (row): OrchestrationCheckpointSummary => ({
             turnId: row.turnId,
