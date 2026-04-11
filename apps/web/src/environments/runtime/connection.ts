@@ -47,6 +47,7 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly kind: "primary" | "saved";
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
+  readonly loadSnapshot?: () => Promise<OrchestrationReadModel>;
   readonly refreshMetadata?: () => Promise<void>;
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
@@ -230,9 +231,10 @@ export function createEnvironmentConnection(
     }
 
     try {
-      const snapshot = await retryTransportRecoveryOperation(() =>
-        input.client.orchestration.getSnapshot(),
-      );
+      const snapshot =
+        input.loadSnapshot !== undefined
+          ? await input.loadSnapshot()
+          : await retryTransportRecoveryOperation(() => input.client.orchestration.getSnapshot());
       if (!disposed) {
         input.syncSnapshot(snapshot, environmentId);
         if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {

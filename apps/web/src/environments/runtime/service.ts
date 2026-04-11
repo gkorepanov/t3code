@@ -28,7 +28,7 @@ import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { projectQueryKeys } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
-import { getPrimaryKnownEnvironment } from "../primary";
+import { getPrimaryKnownEnvironment, resolvePrimaryEnvironmentHttpUrl } from "../primary";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
@@ -89,6 +89,18 @@ function getRuntimeErrorFields(error: unknown) {
 
 function isoNow(): string {
   return new Date().toISOString();
+}
+
+async function fetchOrchestrationSnapshot(
+  url: string,
+  bearerToken?: string,
+): Promise<OrchestrationReadModel> {
+  const response = await fetch(url, {
+    credentials: "include",
+    headers: bearerToken ? { authorization: `Bearer ${bearerToken}` } : {},
+  });
+  if (!response.ok) throw new Error(`Failed to load orchestration snapshot (${response.status}).`);
+  return (await response.json()) as OrchestrationReadModel;
 }
 
 function setRuntimeConnecting(environmentId: EnvironmentId) {
@@ -408,6 +420,8 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
+      loadSnapshot: () =>
+        fetchOrchestrationSnapshot(resolvePrimaryEnvironmentHttpUrl("/api/orchestration/snapshot")),
       ...createEnvironmentConnectionHandlers(),
     }),
   );
@@ -457,6 +471,11 @@ async function ensureSavedEnvironmentConnection(
       environmentId: record.environmentId,
     },
     client,
+    loadSnapshot: () =>
+      fetchOrchestrationSnapshot(
+        new URL("/api/orchestration/snapshot", record.httpBaseUrl).toString(),
+        bearerToken,
+      ),
     refreshMetadata: async () => {
       await refreshSavedEnvironmentMetadata(record, bearerToken, client);
     },
