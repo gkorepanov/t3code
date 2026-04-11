@@ -53,8 +53,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
-            { value: "xhigh", label: "Extra High" },
-            { value: "high", label: "High", isDefault: true },
+            { value: "xhigh", label: "Extra High", isDefault: true },
+            { value: "high", label: "High" },
           ],
           supportsFastMode: true,
           supportsThinkingToggle: false,
@@ -467,7 +467,7 @@ describe("TraitsPicker (Codex)", () => {
     });
 
     await vi.waitFor(() => {
-      expect(document.body.textContent ?? "").toContain("High · Fast");
+      expect(document.body.textContent ?? "").toContain("Extra High · Fast");
     });
   });
 

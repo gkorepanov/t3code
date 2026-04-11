@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
+  getDefaultFastMode,
   isClaudeUltrathinkPrompt,
   trimOrNull,
   getDefaultEffort,
@@ -102,9 +103,10 @@ function getSelectedTraits(
     : null;
 
   // Fast mode
-  const fastModeEnabled =
-    caps.supportsFastMode &&
-    (modelOptions as { fastMode?: boolean } | undefined)?.fastMode === true;
+  const fastModeEnabled = caps.supportsFastMode
+    ? ((modelOptions as { fastMode?: boolean } | undefined)?.fastMode ??
+      getDefaultFastMode(provider))
+    : null;
 
   // Context window
   const contextWindowOptions = caps.contextWindowOptions;

@@ -85,12 +85,18 @@ export function resolveContextWindow(
   return hasContextWindowOption(caps, raw) ? raw : (defaultValue ?? undefined);
 }
 
+export function getDefaultFastMode(provider: ProviderKind): boolean {
+  return provider === "codex";
+}
+
 export function normalizeCodexModelOptionsWithCapabilities(
   caps: ModelCapabilities,
   modelOptions: CodexModelOptions | null | undefined,
 ): CodexModelOptions | undefined {
   const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
-  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
+  const fastMode = caps.supportsFastMode
+    ? (modelOptions?.fastMode ?? getDefaultFastMode("codex"))
+    : undefined;
   const nextOptions: CodexModelOptions = {
     ...(reasoningEffort
       ? { reasoningEffort: reasoningEffort as CodexModelOptions["reasoningEffort"] }
