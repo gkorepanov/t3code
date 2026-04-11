@@ -105,9 +105,12 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { shouldSubmitComposerOnEnter } from "./composerEnterBehavior";
+import { RunningStopButton } from "./RunningStopButton";
+import { resolveRunningComposerControls } from "./runningComposerControls";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -913,6 +916,14 @@ export const ChatComposer = memo(
       [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
     );
     const requireMetaEnterToSend = settings.requireMetaEnterToSend;
+    const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
+    const { showInlineRunningStopButton, showSeparateRunningStopButton } =
+      resolveRunningComposerControls({
+        hasPendingProgress: activePendingProgress !== null,
+        isCoarsePointer,
+        pendingUserInputCount: pendingUserInputs.length,
+        phase,
+      });
 
     // ------------------------------------------------------------------
     // Prompt helpers
@@ -1972,7 +1983,7 @@ export const ChatComposer = memo(
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
                     pendingAction={pendingPrimaryAction}
-                    isRunning={phase === "running"}
+                    isRunning={showInlineRunningStopButton}
                     showPlanFollowUpPrompt={
                       pendingUserInputs.length === 0 && showPlanFollowUpPrompt
                     }
@@ -1985,6 +1996,9 @@ export const ChatComposer = memo(
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                   />
+                  {showSeparateRunningStopButton ? (
+                    <RunningStopButton onClick={handleInterruptPrimaryAction} />
+                  ) : null}
                 </div>
               </div>
             )}
