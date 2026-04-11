@@ -75,6 +75,7 @@ const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
+const OPEN_AUTH_WINDOW_CHANNEL = "desktop:open-auth-window";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
@@ -1588,6 +1589,45 @@ function registerIpcHandlers(): void {
       await shell.openExternal(externalUrl);
       return true;
     } catch {
+      return false;
+    }
+  });
+
+  ipcMain.removeHandler(OPEN_AUTH_WINDOW_CHANNEL);
+  ipcMain.handle(OPEN_AUTH_WINDOW_CHANNEL, async (_event, rawUrl: unknown) => {
+    const authUrl = getSafeExternalUrl(rawUrl);
+    if (!authUrl) {
+      return false;
+    }
+
+    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const authWindow = new BrowserWindow({
+      width: 960,
+      height: 720,
+      autoHideMenuBar: true,
+      ...(owner ? { parent: owner, modal: true } : {}),
+      webPreferences: { sandbox: true },
+    });
+    const authOrigin = new URL(authUrl).origin;
+    let sawForeignOrigin = false;
+    const maybeClose = (url: string) => {
+      const origin = new URL(url).origin;
+      sawForeignOrigin ||= origin !== authOrigin;
+      if (sawForeignOrigin && origin === authOrigin && !authWindow.isDestroyed()) {
+        authWindow.close();
+      }
+    };
+
+    authWindow.webContents.on("did-navigate", (_event, url) => maybeClose(url));
+    authWindow.webContents.on("did-redirect-navigation", (_event, url) => maybeClose(url));
+    try {
+      const closed = new Promise<boolean>((resolve) =>
+        authWindow.once("closed", () => resolve(true)),
+      );
+      await authWindow.loadURL(authUrl);
+      return await closed;
+    } catch {
+      authWindow.destroy();
       return false;
     }
   });
