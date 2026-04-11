@@ -107,6 +107,7 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
+import { shouldSubmitComposerOnEnter } from "./composerEnterBehavior";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -911,6 +912,7 @@ export const ChatComposer = memo(
           : null,
       [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
     );
+    const requireMetaEnterToSend = settings.requireMetaEnterToSend;
 
     // ------------------------------------------------------------------
     // Prompt helpers
@@ -1469,7 +1471,15 @@ export const ChatComposer = memo(
           return true;
         }
       }
-      if (key === "Enter" && !event.shiftKey) {
+      if (
+        shouldSubmitComposerOnEnter({
+          ctrlKey: event.ctrlKey,
+          key,
+          metaKey: event.metaKey,
+          requireMetaEnterToSend,
+          shiftKey: event.shiftKey,
+        })
+      ) {
         void onSend();
         return true;
       }
