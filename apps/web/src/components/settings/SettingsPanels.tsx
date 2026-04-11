@@ -77,6 +77,7 @@ import {
   useServerProviders,
 } from "../../rpc/serverState";
 import { BrowserFileLinksSettingsSection } from "./BrowserFileLinksSettingsSection";
+import { ComposerSettingsSection } from "./ComposerSettingsSection";
 
 const THEME_OPTIONS = [
   {
@@ -369,6 +370,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.requireMetaEnterToSend !== DEFAULT_UNIFIED_SETTINGS.requireMetaEnterToSend
+        ? ["Cmd/Ctrl+Enter to send"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -399,6 +403,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserFileLinkPrefix,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.requireMetaEnterToSend,
       settings.timestampFormat,
       theme,
     ],
@@ -981,6 +986,7 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
+      <ComposerSettingsSection />
       <BrowserFileLinksSettingsSection />
 
       <SettingsSection
