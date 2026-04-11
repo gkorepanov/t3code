@@ -143,6 +143,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
@@ -2701,7 +2702,7 @@ export default function Sidebar() {
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
   }));
   const { updateSettings } = useUpdateSettings();
-  const { handleNewThread } = useNewThreadHandler();
+  const { handleNewThread: baseHandleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
   const routeThreadRef = useParams({
     strict: false,
@@ -2721,6 +2722,7 @@ export default function Sidebar() {
   const selectedThreadCount = useThreadSelectionStore((s) => s.selectedThreadKeys.size);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
+  const { isMobile, setOpenMobile } = useSidebar();
   const platform = navigator.platform;
   const shortcutModifiers = useShortcutModifierState();
   const modelPickerOpen = useModelPickerOpen();
@@ -2848,6 +2850,19 @@ export default function Sidebar() {
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.newLocal", newThreadShortcutLabelOptions) ??
     shortcutLabelForCommand(keybindings, "chat.new", newThreadShortcutLabelOptions);
+  const closeMobileSidebar = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+
+  const handleNewThread = useCallback(
+    async (...args: Parameters<typeof baseHandleNewThread>) => {
+      await baseHandleNewThread(...args);
+      closeMobileSidebar();
+    },
+    [baseHandleNewThread, closeMobileSidebar],
+  );
 
   const navigateToThread = useCallback(
     (threadRef: ScopedThreadRef) => {
@@ -2858,10 +2873,11 @@ export default function Sidebar() {
       void navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(threadRef),
-      });
+      }).then(() => closeMobileSidebar());
     },
-    [clearSelection, navigate, setSelectionAnchor],
+    [clearSelection, closeMobileSidebar, navigate, setSelectionAnchor],
   );
+
 
   const projectDnDSensors = useSensors(
     useSensor(PointerSensor, {
