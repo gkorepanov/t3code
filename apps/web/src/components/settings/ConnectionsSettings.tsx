@@ -686,7 +686,32 @@ function SavedBackendListRow({
 }: SavedBackendListRowProps) {
   const nowMs = useRelativeTimeTick(1_000);
   const record = useSavedEnvironmentRegistryStore((state) => state.byId[environmentId] ?? null);
+  const upsertSavedEnvironment = useSavedEnvironmentRegistryStore((state) => state.upsert);
   const runtime = useSavedEnvironmentRuntimeStore((state) => state.byId[environmentId] ?? null);
+  const [editorRemoteHostDraft, setEditorRemoteHostDraft] = useState("");
+  const currentEditorRemoteHost = record?.editorRemoteHost ?? "";
+  const isDesktop = typeof window !== "undefined" && window.desktopBridge != null;
+
+  useEffect(() => {
+    setEditorRemoteHostDraft(currentEditorRemoteHost);
+  }, [currentEditorRemoteHost]);
+
+  const saveEditorRemoteHost = useCallback(() => {
+    if (!record) {
+      return;
+    }
+    const normalized = editorRemoteHostDraft.trim();
+    const currentValue = currentEditorRemoteHost;
+    if (normalized === currentValue) {
+      return;
+    }
+
+    const { editorRemoteHost: _existingEditorRemoteHost, ...restRecord } = record;
+    upsertSavedEnvironment({
+      ...restRecord,
+      ...(normalized ? { editorRemoteHost: normalized } : {}),
+    });
+  }, [currentEditorRemoteHost, editorRemoteHostDraft, record, upsertSavedEnvironment]);
 
   if (!record) {
     return null;
@@ -730,6 +755,28 @@ function SavedBackendListRow({
           ) : null}
           {descriptorLabel && descriptorLabel !== record.label ? (
             <p className="text-xs text-muted-foreground">Server label: {descriptorLabel}</p>
+          ) : null}
+          {isDesktop ? (
+            <label className="block pt-1">
+              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                Remote SSH host
+              </span>
+              <Input
+                value={editorRemoteHostDraft}
+                onChange={(event) => setEditorRemoteHostDraft(event.target.value)}
+                onBlur={saveEditorRemoteHost}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.currentTarget.blur();
+                }}
+                placeholder="wf-gk"
+                spellCheck={false}
+              />
+              <span className="mt-1 block text-[11px] text-muted-foreground">
+                Used only for VS Code-based editors. Chat links reuse the current window; Cmd+click
+                Open does too.
+              </span>
+            </label>
           ) : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">

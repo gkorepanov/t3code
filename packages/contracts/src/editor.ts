@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 
 export const EditorLaunchStyle = Schema.Literals(["direct-path", "goto", "line-column"]);
 export type EditorLaunchStyle = typeof EditorLaunchStyle.Type;
@@ -33,9 +33,16 @@ export const EDITORS = [
 export const EditorId = Schema.Literals(EDITORS.map((e) => e.id));
 export type EditorId = typeof EditorId.Type;
 
+export interface EditorOpenOptions {
+  readonly remoteHost?: string;
+  readonly reuseWindow?: boolean;
+}
+
 export const OpenInEditorInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   editor: EditorId,
+  remoteHost: Schema.optionalKey(TrimmedString),
+  reuseWindow: Schema.optionalKey(Schema.Boolean),
 });
 export type OpenInEditorInput = typeof OpenInEditorInput.Type;
 

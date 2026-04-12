@@ -210,6 +210,54 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
     }),
   );
 
+  it.effect("prepends remote ssh args for VS Code-based editors", () =>
+    Effect.gen(function* () {
+      const remoteCursorLaunchWithoutReuse = yield* resolveEditorLaunch(
+        {
+          cwd: "/tmp/workspace/src/open.ts:71:5",
+          editor: "cursor",
+          remoteHost: "wf-gk",
+        },
+        "darwin",
+        { PATH: "" },
+      );
+      assert.deepEqual(remoteCursorLaunchWithoutReuse, {
+        command: "cursor",
+        args: ["--remote", "ssh-remote+wf-gk", "--goto", "/tmp/workspace/src/open.ts:71:5"],
+      });
+
+      const remoteCursorLaunch = yield* resolveEditorLaunch(
+        {
+          cwd: "/tmp/workspace/src/open.ts:71:5",
+          editor: "cursor",
+          remoteHost: "wf-gk",
+          reuseWindow: true,
+        },
+        "darwin",
+        { PATH: "" },
+      );
+      assert.deepEqual(remoteCursorLaunch, {
+        command: "cursor",
+        args: ["--remote", "ssh-remote+wf-gk", "-r", "--goto", "/tmp/workspace/src/open.ts:71:5"],
+      });
+
+      const ignoredForZed = yield* resolveEditorLaunch(
+        {
+          cwd: "/tmp/workspace",
+          editor: "zed",
+          remoteHost: "wf-gk",
+          reuseWindow: true,
+        },
+        "darwin",
+        { PATH: "" },
+      );
+      assert.deepEqual(ignoredForZed, {
+        command: "zed",
+        args: ["/tmp/workspace"],
+      });
+    }),
+  );
+
   it.effect("falls back to zeditor when zed is not installed", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

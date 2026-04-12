@@ -10,6 +10,7 @@ const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
   wsBaseUrl: "wss://remote.example.com/",
   createdAt: "2026-04-09T00:00:00.000Z",
   lastConnectedAt: null,
+  editorRemoteHost: "wf-gk",
 };
 
 function createLocalStorageStub(): Storage {

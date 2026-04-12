@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
@@ -30,6 +31,7 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
+import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import {
   resolveMarkdownFileLinkBehavior,
   shouldHandleMarkdownFileLinkClick,
@@ -59,6 +61,7 @@ class CodeHighlightErrorBoundary extends React.Component<
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
+  environmentId?: EnvironmentId;
   isStreaming?: boolean;
 }
 
@@ -254,6 +257,7 @@ interface MarkdownFileLinkProps {
   label: string;
   theme: "light" | "dark";
   remoteEditorHref: string | null;
+  editorRemoteHost: string | null;
   interceptsPlainClick: boolean;
   className?: string | undefined;
 }
@@ -346,6 +350,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   label,
   theme,
   remoteEditorHref,
+  editorRemoteHost,
   interceptsPlainClick,
   className,
 }: MarkdownFileLinkProps) {
@@ -364,7 +369,11 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       return;
     }
 
-    void openInPreferredEditor(api, targetPath).catch((error) => {
+    void openInPreferredEditor(
+      api,
+      targetPath,
+      editorRemoteHost ? { remoteHost: editorRemoteHost, reuseWindow: true } : undefined,
+    ).catch((error) => {
       toastManager.add(
         stackedThreadToast({
           type: "error",
@@ -373,7 +382,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         }),
       );
     });
-  }, [remoteEditorHref, targetPath]);
+  }, [editorRemoteHost, remoteEditorHref, targetPath]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -489,15 +498,21 @@ function areMarkdownFileLinkPropsEqual(
     previous.label === next.label &&
     previous.theme === next.theme &&
     previous.remoteEditorHref === next.remoteEditorHref &&
+    previous.editorRemoteHost === next.editorRemoteHost &&
     previous.interceptsPlainClick === next.interceptsPlainClick &&
     previous.className === next.className
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMarkdownProps) {
   const settings = useSettings();
   const browserFileLinkPrefix = settings.browserFileLinkPrefix;
   const localApi = readLocalApi();
+  const editorRemoteHost = useSavedEnvironmentRegistryStore((state) =>
+    environmentId && typeof window !== "undefined" && window.desktopBridge
+      ? state.byId[environmentId]?.editorRemoteHost?.trim() || null
+      : null,
+  );
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
@@ -532,6 +547,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
           cwd,
           hasNativeApi: localApi != null,
           href: normalizedHref,
+          preferLocalEditorOpen: localApi != null && editorRemoteHost != null,
         });
 
         if (!fileLinkMeta) {
@@ -558,6 +574,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
             label={labelParts.join(" · ")}
             theme={resolvedTheme}
             remoteEditorHref={linkBehavior.remoteEditorHref}
+            editorRemoteHost={editorRemoteHost}
             interceptsPlainClick={linkBehavior.interceptsPlainClick}
             className={props.className}
           />
@@ -592,6 +609,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
       markdownFileLinkMetaByHref,
       browserFileLinkPrefix,
       cwd,
+      editorRemoteHost,
       localApi,
       resolvedTheme,
     ],

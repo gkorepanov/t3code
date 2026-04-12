@@ -103,6 +103,7 @@ export const ChatHeader = memo(function ChatHeader({
         )}
         {activeProjectName && (
           <OpenInPicker
+            environmentId={activeThreadEnvironmentId}
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}

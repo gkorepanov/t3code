@@ -68,4 +68,21 @@ describe("resolveMarkdownFileLinkBehavior", () => {
       targetPath: "/home/julius/project/src/main.ts:42",
     });
   });
+
+  it("prefers native editor handling when a desktop override is present", () => {
+    expect(
+      resolveMarkdownFileLinkBehavior({
+        browserFileLinkPrefix: "vscode://vscode-remote/ssh-remote+wf-gk/",
+        cwd: "/home/julius/project",
+        hasNativeApi: true,
+        href: "src/main.ts:42",
+        preferLocalEditorOpen: true,
+      }),
+    ).toEqual({
+      browserHref: "/file/home/julius/project/src/main.ts:42",
+      interceptsPlainClick: true,
+      remoteEditorHref: null,
+      targetPath: "/home/julius/project/src/main.ts:42",
+    });
+  });
 });

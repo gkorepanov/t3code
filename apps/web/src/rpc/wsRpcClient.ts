@@ -1,4 +1,5 @@
 import {
+  type EditorOpenOptions,
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -72,10 +73,12 @@ export interface WsRpcClient {
     readonly browse: RpcUnaryMethod<typeof WS_METHODS.filesystemBrowse>;
   };
   readonly shell: {
-    readonly openInEditor: (input: {
-      readonly cwd: Parameters<LocalApi["shell"]["openInEditor"]>[0];
-      readonly editor: Parameters<LocalApi["shell"]["openInEditor"]>[1];
-    }) => ReturnType<LocalApi["shell"]["openInEditor"]>;
+    readonly openInEditor: (
+      input: {
+        readonly cwd: Parameters<LocalApi["shell"]["openInEditor"]>[0];
+        readonly editor: Parameters<LocalApi["shell"]["openInEditor"]>[1];
+      } & EditorOpenOptions,
+    ) => ReturnType<LocalApi["shell"]["openInEditor"]>;
   };
   readonly git: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.gitPull>;

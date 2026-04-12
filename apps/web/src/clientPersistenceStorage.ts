@@ -19,6 +19,7 @@ const BrowserSavedEnvironmentRecordSchema = Schema.Struct({
   wsBaseUrl: Schema.String,
   createdAt: Schema.String,
   lastConnectedAt: Schema.NullOr(Schema.String),
+  editorRemoteHost: Schema.optionalKey(Schema.String),
   bearerToken: Schema.optionalKey(Schema.String),
 });
 type BrowserSavedEnvironmentRecord = typeof BrowserSavedEnvironmentRecordSchema.Type;
@@ -44,6 +45,7 @@ function toPersistedSavedEnvironmentRecord(
     wsBaseUrl: record.wsBaseUrl,
     createdAt: record.createdAt,
     lastConnectedAt: record.lastConnectedAt,
+    ...(record.editorRemoteHost ? { editorRemoteHost: record.editorRemoteHost } : {}),
   };
 }
 
@@ -135,6 +137,7 @@ export function writeBrowserSavedEnvironmentRegistry(
             wsBaseUrl: record.wsBaseUrl,
             createdAt: record.createdAt,
             lastConnectedAt: record.lastConnectedAt,
+            ...(record.editorRemoteHost ? { editorRemoteHost: record.editorRemoteHost } : {}),
             bearerToken,
           }
         : toPersistedSavedEnvironmentRecord(record);
@@ -166,6 +169,18 @@ export function writeBrowserSavedEnvironmentSecret(
         return record;
       }
       found = true;
+      if (record.editorRemoteHost) {
+        return {
+          environmentId: record.environmentId,
+          label: record.label,
+          httpBaseUrl: record.httpBaseUrl,
+          wsBaseUrl: record.wsBaseUrl,
+          createdAt: record.createdAt,
+          lastConnectedAt: record.lastConnectedAt,
+          editorRemoteHost: record.editorRemoteHost,
+          bearerToken: secret,
+        } satisfies BrowserSavedEnvironmentRecord;
+      }
       return {
         environmentId: record.environmentId,
         label: record.label,

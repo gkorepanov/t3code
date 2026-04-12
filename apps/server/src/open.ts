@@ -22,6 +22,8 @@ export { isCommandAvailable } from "@t3tools/shared/shell";
 export interface OpenInEditorInput {
   readonly cwd: string;
   readonly editor: EditorId;
+  readonly remoteHost?: string;
+  readonly reuseWindow?: boolean;
 }
 
 interface EditorLaunch {
@@ -30,6 +32,14 @@ interface EditorLaunch {
 }
 
 const TARGET_WITH_POSITION_PATTERN = /^(.*?):(\d+)(?::(\d+))?$/;
+const VSCODE_BASED_EDITORS = new Set<EditorId>([
+  "cursor",
+  "trae",
+  "vscode",
+  "vscode-insiders",
+  "vscodium",
+  "antigravity",
+]);
 
 function parseTargetPathAndPosition(target: string): {
   path: string;
@@ -70,12 +80,33 @@ function resolveCommandEditorArgs(
   }
 }
 
+function resolveEditorOpenArgOverrides(
+  editor: EditorId,
+  remoteHost: string | undefined,
+  reuseWindow: boolean | undefined,
+): ReadonlyArray<string> {
+  if (!VSCODE_BASED_EDITORS.has(editor)) {
+    return [];
+  }
+
+  const normalizedRemoteHost = remoteHost?.trim();
+  if (!normalizedRemoteHost) {
+    return [];
+  }
+
+  return ["--remote", `ssh-remote+${normalizedRemoteHost}`, ...(reuseWindow ? ["-r"] : [])];
+}
+
 function resolveEditorArgs(
   editor: (typeof EDITORS)[number],
-  target: string,
+  input: OpenInEditorInput,
 ): ReadonlyArray<string> {
   const baseArgs = "baseArgs" in editor ? editor.baseArgs : [];
-  return [...baseArgs, ...resolveCommandEditorArgs(editor, target)];
+  return [
+    ...baseArgs,
+    ...resolveEditorOpenArgOverrides(editor.id, input.remoteHost, input.reuseWindow),
+    ...resolveCommandEditorArgs(editor, input.cwd),
+  ];
 }
 
 function resolveAvailableCommand(
@@ -171,7 +202,7 @@ export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
       resolveAvailableCommand(editorDef.commands, { platform, env }) ?? editorDef.commands[0];
     return {
       command,
-      args: resolveEditorArgs(editorDef, input.cwd),
+      args: resolveEditorArgs(editorDef, input),
     };
   }
 
