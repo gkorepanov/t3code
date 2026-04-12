@@ -2075,7 +2075,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("routes websocket rpc shell.openInEditor", () =>
     Effect.gen(function* () {
-      let openedInput: { cwd: string; editor: EditorId } | null = null;
+      let openedInput: {
+        cwd: string;
+        editor: EditorId;
+        remoteHost?: string;
+        reuseWindow?: boolean;
+      } | null = null;
       yield* buildAppUnderTest({
         layers: {
           open: {
@@ -2093,11 +2098,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           client[WS_METHODS.shellOpenInEditor]({
             cwd: "/tmp/project",
             editor: "cursor",
+            remoteHost: "wf-gk",
+            reuseWindow: true,
           }),
         ),
       );
 
-      assert.deepEqual(openedInput, { cwd: "/tmp/project", editor: "cursor" });
+      assert.deepEqual(openedInput, {
+        cwd: "/tmp/project",
+        editor: "cursor",
+        remoteHost: "wf-gk",
+        reuseWindow: true,
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

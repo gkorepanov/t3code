@@ -32,15 +32,19 @@ export function resolveMarkdownFileLinkBehavior({
   cwd,
   hasNativeApi,
   href,
+  preferLocalEditorOpen = false,
 }: {
   browserFileLinkPrefix: string | undefined;
   cwd: string | undefined;
   hasNativeApi: boolean;
   href: string | undefined;
+  preferLocalEditorOpen?: boolean;
 }): MarkdownFileLinkBehavior {
   const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
   const browserHref = buildMarkdownBrowserFileHref(targetPath);
-  const remoteEditorHref = buildMarkdownRemoteEditorHref(targetPath, browserFileLinkPrefix);
+  const remoteEditorHref = preferLocalEditorOpen
+    ? null
+    : buildMarkdownRemoteEditorHref(targetPath, browserFileLinkPrefix);
   return {
     browserHref: browserHref ?? href,
     interceptsPlainClick: targetPath != null && (remoteEditorHref != null || hasNativeApi),

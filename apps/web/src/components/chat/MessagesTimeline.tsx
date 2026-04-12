@@ -468,6 +468,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 <ChatMarkdown
                   text={messageText}
                   cwd={markdownCwd}
+                  environmentId={activeThreadEnvironmentId}
                   isStreaming={Boolean(row.message.streaming)}
                 />
                 {(() => {

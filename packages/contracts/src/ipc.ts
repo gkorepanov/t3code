@@ -50,7 +50,7 @@ import type {
   OrchestrationReadModel,
 } from "./orchestration";
 import type { EnvironmentId } from "./baseSchemas";
-import { EditorId } from "./editor";
+import { EditorId, type EditorOpenOptions } from "./editor";
 import { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -120,6 +120,7 @@ export interface PersistedSavedEnvironmentRecord {
   httpBaseUrl: string;
   createdAt: string;
   lastConnectedAt: string | null;
+  editorRemoteHost?: string;
 }
 
 export type DesktopServerExposureMode = "local-only" | "network-accessible";
@@ -176,7 +177,7 @@ export interface LocalApi {
     confirm: (message: string) => Promise<boolean>;
   };
   shell: {
-    openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
+    openInEditor: (cwd: string, editor: EditorId, options?: EditorOpenOptions) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
   };
   contextMenu: {

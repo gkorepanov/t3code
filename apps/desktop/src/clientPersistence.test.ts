@@ -66,6 +66,7 @@ const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
   wsBaseUrl: "wss://remote.example.com/",
   createdAt: "2026-04-09T00:00:00.000Z",
   lastConnectedAt: "2026-04-09T01:00:00.000Z",
+  editorRemoteHost: "wf-gk",
 };
 
 describe("clientPersistence", () => {

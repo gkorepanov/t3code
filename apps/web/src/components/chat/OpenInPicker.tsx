@@ -1,7 +1,8 @@
-import { EditorId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
+import { useSavedEnvironmentRegistryStore } from "../../environments/runtime";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
@@ -76,15 +77,22 @@ const resolveOptions = (platform: string, availableEditors: ReadonlyArray<Editor
 };
 
 export const OpenInPicker = memo(function OpenInPicker({
+  environmentId,
   keybindings,
   availableEditors,
   openInCwd,
 }: {
+  environmentId: EnvironmentId;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
 }) {
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
+  const editorRemoteHost = useSavedEnvironmentRegistryStore((state) =>
+    typeof window !== "undefined" && window.desktopBridge
+      ? state.byId[environmentId]?.editorRemoteHost?.trim() || null
+      : null,
+  );
   const options = useMemo(
     () => resolveOptions(navigator.platform, availableEditors),
     [availableEditors],
@@ -92,15 +100,19 @@ export const OpenInPicker = memo(function OpenInPicker({
   const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;
 
   const openInEditor = useCallback(
-    (editorId: EditorId | null) => {
+    (editorId: EditorId | null, reuseWindow = false) => {
       const api = readLocalApi();
       if (!api || !openInCwd) return;
       const editor = editorId ?? preferredEditor;
       if (!editor) return;
-      void api.shell.openInEditor(openInCwd, editor);
+      void api.shell.openInEditor(
+        openInCwd,
+        editor,
+        editorRemoteHost ? { remoteHost: editorRemoteHost, reuseWindow } : undefined,
+      );
       setPreferredEditor(editor);
     },
-    [preferredEditor, openInCwd, setPreferredEditor],
+    [editorRemoteHost, preferredEditor, openInCwd, setPreferredEditor],
   );
 
   const openFavoriteEditorShortcutLabel = useMemo(
@@ -116,11 +128,15 @@ export const OpenInPicker = memo(function OpenInPicker({
       if (!preferredEditor) return;
 
       e.preventDefault();
-      void api.shell.openInEditor(openInCwd, preferredEditor);
+      void api.shell.openInEditor(
+        openInCwd,
+        preferredEditor,
+        editorRemoteHost ? { remoteHost: editorRemoteHost, reuseWindow: false } : undefined,
+      );
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [preferredEditor, keybindings, openInCwd]);
+  }, [editorRemoteHost, preferredEditor, keybindings, openInCwd]);
 
   return (
     <Group aria-label="Subscription actions">
@@ -128,7 +144,12 @@ export const OpenInPicker = memo(function OpenInPicker({
         size="xs"
         variant="outline"
         disabled={!preferredEditor || !openInCwd}
-        onClick={() => openInEditor(preferredEditor)}
+        onClick={(event) =>
+          openInEditor(
+            preferredEditor,
+            event.metaKey || (!isMacPlatform(navigator.platform) && event.ctrlKey),
+          )
+        }
       >
         {primaryOption?.Icon && <primaryOption.Icon aria-hidden="true" className="size-3.5" />}
         <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">

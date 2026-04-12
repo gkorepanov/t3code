@@ -3,6 +3,7 @@ import {
   type EnvironmentId,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type PersistedSavedEnvironmentRecord,
   type ServerConfig,
   type TerminalEvent,
   ThreadId,
@@ -667,14 +668,20 @@ export async function addSavedEnvironment(input: {
   );
   if (!didPersistBearerToken) {
     await ensureLocalApi().persistence.setSavedEnvironmentRegistry(
-      listSavedEnvironmentRecords().map((entry) => ({
-        environmentId: entry.environmentId,
-        label: entry.label,
-        httpBaseUrl: entry.httpBaseUrl,
-        wsBaseUrl: entry.wsBaseUrl,
-        createdAt: entry.createdAt,
-        lastConnectedAt: entry.lastConnectedAt,
-      })),
+      listSavedEnvironmentRecords().map((entry) => {
+        const record: PersistedSavedEnvironmentRecord = {
+          environmentId: entry.environmentId,
+          label: entry.label,
+          httpBaseUrl: entry.httpBaseUrl,
+          wsBaseUrl: entry.wsBaseUrl,
+          createdAt: entry.createdAt,
+          lastConnectedAt: entry.lastConnectedAt,
+        };
+        if (entry.editorRemoteHost) {
+          record.editorRemoteHost = entry.editorRemoteHost;
+        }
+        return record;
+      }),
     );
     throw new Error("Unable to persist saved environment credentials.");
   }

@@ -52,6 +52,7 @@ function isPersistedSavedEnvironmentStorageRecord(
     typeof value.wsBaseUrl === "string" &&
     typeof value.createdAt === "string" &&
     (value.lastConnectedAt === null || typeof value.lastConnectedAt === "string") &&
+    (value.editorRemoteHost === undefined || typeof value.editorRemoteHost === "string") &&
     (value.encryptedBearerToken === undefined || typeof value.encryptedBearerToken === "string")
   );
 }
@@ -79,6 +80,7 @@ function toPersistedSavedEnvironmentRecord(
     wsBaseUrl: record.wsBaseUrl,
     createdAt: record.createdAt,
     lastConnectedAt: record.lastConnectedAt,
+    ...(record.editorRemoteHost ? { editorRemoteHost: record.editorRemoteHost } : {}),
   };
 }
 
@@ -121,6 +123,7 @@ export function writeSavedEnvironmentRegistry(
             wsBaseUrl: record.wsBaseUrl,
             createdAt: record.createdAt,
             lastConnectedAt: record.lastConnectedAt,
+            ...(record.editorRemoteHost ? { editorRemoteHost: record.editorRemoteHost } : {}),
             encryptedBearerToken,
           }
         : record;
@@ -176,7 +179,7 @@ export function writeSavedEnvironmentSecret(input: {
       const encryptedBearerToken = input.secretStorage
         .encryptString(input.secret)
         .toString("base64");
-      return {
+      const nextRecord: PersistedSavedEnvironmentStorageRecord = {
         environmentId: record.environmentId,
         label: record.label,
         httpBaseUrl: record.httpBaseUrl,
@@ -184,7 +187,11 @@ export function writeSavedEnvironmentSecret(input: {
         createdAt: record.createdAt,
         lastConnectedAt: record.lastConnectedAt,
         encryptedBearerToken,
-      } satisfies PersistedSavedEnvironmentStorageRecord;
+      };
+      if (record.editorRemoteHost) {
+        nextRecord.editorRemoteHost = record.editorRemoteHost;
+      }
+      return nextRecord;
     }),
   } satisfies SavedEnvironmentRegistryDocument);
   return found;

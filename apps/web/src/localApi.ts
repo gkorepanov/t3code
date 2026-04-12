@@ -41,7 +41,12 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
       },
     },
     shell: {
-      openInEditor: (cwd, editor) => rpcClient.shell.openInEditor({ cwd, editor }),
+      openInEditor: (cwd, editor, options) =>
+        rpcClient.shell.openInEditor({
+          cwd,
+          editor,
+          ...options,
+        }),
       openExternal: async (url) => {
         if (window.desktopBridge) {
           const opened = await window.desktopBridge.openExternal(url);

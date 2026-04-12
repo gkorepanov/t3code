@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
@@ -25,6 +26,7 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
+import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import {
   resolveMarkdownFileLinkBehavior,
   shouldHandleMarkdownFileLinkClick,
@@ -54,6 +56,7 @@ class CodeHighlightErrorBoundary extends React.Component<
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
+  environmentId?: EnvironmentId;
   isStreaming?: boolean;
 }
 
@@ -241,10 +244,15 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMarkdownProps) {
   const settings = useSettings();
   const browserFileLinkPrefix = settings.browserFileLinkPrefix;
   const localApi = readLocalApi();
+  const editorRemoteHost = useSavedEnvironmentRegistryStore((state) =>
+    environmentId && typeof window !== "undefined" && window.desktopBridge
+      ? state.byId[environmentId]?.editorRemoteHost?.trim() || null
+      : null,
+  );
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownUrlTransform = useCallback((href: string) => {
@@ -258,6 +266,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
           cwd,
           hasNativeApi: localApi != null,
           href,
+          preferLocalEditorOpen: localApi != null && editorRemoteHost != null,
         });
         const targetPath = linkBehavior.targetPath;
         if (!targetPath) {
@@ -279,7 +288,11 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
               if (!localApi) return;
               event.preventDefault();
               event.stopPropagation();
-              void openInPreferredEditor(localApi, targetPath);
+              void openInPreferredEditor(
+                localApi,
+                targetPath,
+                editorRemoteHost ? { remoteHost: editorRemoteHost, reuseWindow: true } : undefined,
+              );
             }}
           />
         );
@@ -306,7 +319,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [browserFileLinkPrefix, cwd, diffThemeName, isStreaming, localApi],
+    [browserFileLinkPrefix, cwd, diffThemeName, editorRemoteHost, isStreaming, localApi],
   );
 
   return (
