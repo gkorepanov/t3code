@@ -862,6 +862,55 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("serves orchestration snapshots to authenticated paired bearer sessions", () =>
+    Effect.gen(function* () {
+      const snapshot = {
+        ...makeDefaultOrchestrationReadModel(),
+        snapshotSequence: 7,
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getSnapshot: () => Effect.succeed(snapshot),
+          },
+        },
+      });
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const pairingTokenUrl = yield* getHttpServerUrl("/api/auth/pairing-token");
+      const pairingResponse = yield* Effect.promise(() =>
+        fetch(pairingTokenUrl, {
+          method: "POST",
+          headers: {
+            cookie: ownerCookie,
+          },
+        }),
+      );
+      const pairingBody = (yield* Effect.promise(() => pairingResponse.json())) as {
+        readonly credential: string;
+      };
+      assert.equal(pairingResponse.status, 200);
+
+      const bearerToken = yield* getAuthenticatedBearerSessionToken(pairingBody.credential);
+      const snapshotUrl = yield* getHttpServerUrl("/api/orchestration/snapshot");
+      const snapshotResponse = yield* Effect.promise(() =>
+        fetch(snapshotUrl, {
+          headers: {
+            authorization: `Bearer ${bearerToken}`,
+          },
+        }),
+      );
+      const snapshotBody = (yield* Effect.promise(() =>
+        snapshotResponse.json(),
+      )) as typeof snapshot;
+
+      assert.equal(snapshotResponse.status, 200);
+      assert.equal(snapshotBody.snapshotSequence, 7);
+      assert.deepEqual(snapshotBody.projects, snapshot.projects);
+      assert.deepEqual(snapshotBody.threads, snapshot.threads);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
