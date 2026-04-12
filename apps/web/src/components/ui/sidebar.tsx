@@ -245,7 +245,12 @@ function Sidebar({
               <SheetTitle>Sidebar</SheetTitle>
               <SheetDescription>Displays the mobile sidebar.</SheetDescription>
             </SheetHeader>
-            <div className="flex h-full w-full flex-col">{children}</div>
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              style={{ paddingBottom: "var(--mobile-app-bottom-offset, 0px)" }}
+            >
+              {children}
+            </div>
           </SheetPopup>
         </Sheet>
       </SidebarInstanceContext.Provider>
