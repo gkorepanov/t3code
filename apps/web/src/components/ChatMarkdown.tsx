@@ -30,6 +30,7 @@ import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import {
   resolveMarkdownFileLinkBehavior,
   resolveMarkdownFilePlainClickAction,
+  resolveMarkdownFileUrlBehavior,
   shouldHandleMarkdownFileLinkClick,
   shouldPreviewMarkdownFileLinkClick,
 } from "./chatMarkdownLinkBehavior";
@@ -324,6 +325,14 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
             }}
           />
         );
+      },
+      img({ node: _node, src, ...props }) {
+        const imageBehavior = resolveMarkdownFileUrlBehavior({
+          cwd,
+          environmentId,
+          href: src,
+        });
+        return <img {...props} src={imageBehavior.browserHref} />;
       },
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);

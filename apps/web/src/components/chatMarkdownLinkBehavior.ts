@@ -15,6 +15,11 @@ export interface MarkdownFileLinkBehavior {
   readonly targetPath: string | null;
 }
 
+export interface MarkdownFileUrlBehavior {
+  readonly browserHref: string | undefined;
+  readonly targetPath: string | null;
+}
+
 export type MarkdownFilePlainClickAction = "browser" | "local-editor" | "remote-editor";
 
 export function shouldHandleMarkdownFileLinkClick(
@@ -62,21 +67,15 @@ export function resolveMarkdownFilePlainClickAction(input: {
   return "browser";
 }
 
-export function resolveMarkdownFileLinkBehavior({
-  browserFileLinkPrefix,
+export function resolveMarkdownFileUrlBehavior({
   cwd,
   environmentId,
-  hasNativeApi,
   href,
-  preferLocalEditorOpen = false,
 }: {
-  browserFileLinkPrefix: string | undefined;
   cwd: string | undefined;
   environmentId: EnvironmentId | undefined;
-  hasNativeApi: boolean;
   href: string | undefined;
-  preferLocalEditorOpen?: boolean;
-}): MarkdownFileLinkBehavior {
+}): MarkdownFileUrlBehavior {
   const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
   const relativeBrowserHref = buildMarkdownBrowserFileHref(targetPath);
   const browserHref =
@@ -94,6 +93,32 @@ export function resolveMarkdownFileLinkBehavior({
               return relativeBrowserHref;
             }
           })();
+  return {
+    browserHref: browserHref ?? href,
+    targetPath,
+  };
+}
+
+export function resolveMarkdownFileLinkBehavior({
+  browserFileLinkPrefix,
+  cwd,
+  environmentId,
+  hasNativeApi,
+  href,
+  preferLocalEditorOpen = false,
+}: {
+  browserFileLinkPrefix: string | undefined;
+  cwd: string | undefined;
+  environmentId: EnvironmentId | undefined;
+  hasNativeApi: boolean;
+  href: string | undefined;
+  preferLocalEditorOpen?: boolean;
+}): MarkdownFileLinkBehavior {
+  const { browserHref, targetPath } = resolveMarkdownFileUrlBehavior({
+    cwd,
+    environmentId,
+    href,
+  });
   const remoteEditorHref = preferLocalEditorOpen
     ? null
     : buildMarkdownRemoteEditorHref(targetPath, browserFileLinkPrefix);
