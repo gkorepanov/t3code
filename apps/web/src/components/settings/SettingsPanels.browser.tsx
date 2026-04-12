@@ -258,6 +258,9 @@ function makeClientSession(input: {
 const createDesktopBridgeStub = (overrides?: {
   readonly serverExposureState?: Awaited<ReturnType<DesktopBridge["getServerExposureState"]>>;
   readonly setServerExposureMode?: DesktopBridge["setServerExposureMode"];
+  readonly agentSleepState?: Awaited<ReturnType<DesktopBridge["getAgentSleepState"]>>;
+  readonly setPreventSleepWhileAgentIsRunning?: DesktopBridge["setPreventSleepWhileAgentIsRunning"];
+  readonly setAgentRunningState?: DesktopBridge["setAgentRunningState"];
 }): DesktopBridge => {
   const idleUpdateState: DesktopUpdateState = {
     enabled: false,
@@ -303,6 +306,27 @@ const createDesktopBridgeStub = (overrides?: {
         endpointUrl: mode === "network-accessible" ? "http://192.168.1.44:3773" : null,
         advertisedHost: mode === "network-accessible" ? "192.168.1.44" : null,
       })),
+    getAgentSleepState: vi.fn().mockResolvedValue(
+      overrides?.agentSleepState ?? {
+        preventSleepWhileAgentIsRunning: false,
+        agentIsRunning: false,
+        sleepBlockerActive: false,
+      },
+    ),
+    setPreventSleepWhileAgentIsRunning:
+      overrides?.setPreventSleepWhileAgentIsRunning ??
+      vi.fn().mockImplementation(async (enabled) => ({
+        preventSleepWhileAgentIsRunning: enabled,
+        agentIsRunning: false,
+        sleepBlockerActive: false,
+      })),
+    setAgentRunningState:
+      overrides?.setAgentRunningState ??
+      vi.fn().mockResolvedValue({
+        preventSleepWhileAgentIsRunning: false,
+        agentIsRunning: false,
+        sleepBlockerActive: false,
+      }),
     pickFolder: vi.fn().mockResolvedValue(null),
     confirm: vi.fn().mockResolvedValue(false),
     setTheme: vi.fn().mockResolvedValue(undefined),
@@ -694,5 +718,40 @@ describe("GeneralSettingsPanel observability", () => {
     await openLogsButton.click();
 
     expect(openInEditor).toHaveBeenCalledWith("/repo/project/.t3/logs", "cursor");
+  });
+
+  it("toggles desktop sleep prevention from general settings", async () => {
+    const setPreventSleepWhileAgentIsRunning = vi
+      .fn<DesktopBridge["setPreventSleepWhileAgentIsRunning"]>()
+      .mockResolvedValue({
+        preventSleepWhileAgentIsRunning: true,
+        agentIsRunning: true,
+        sleepBlockerActive: true,
+      });
+    window.desktopBridge = createDesktopBridgeStub({
+      agentSleepState: {
+        preventSleepWhileAgentIsRunning: false,
+        agentIsRunning: true,
+        sleepBlockerActive: false,
+      },
+      setPreventSleepWhileAgentIsRunning,
+    });
+
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    const sleepToggle = page.getByLabelText("Prevent system sleep while agent is running");
+    await expect.element(sleepToggle).not.toBeDisabled();
+    await sleepToggle.click();
+
+    await vi.waitFor(() => {
+      expect(setPreventSleepWhileAgentIsRunning).toHaveBeenCalledWith(true);
+    });
+    await expect.element(page.getByText("Active for the current run.")).toBeInTheDocument();
   });
 });

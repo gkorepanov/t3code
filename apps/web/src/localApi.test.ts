@@ -187,6 +187,21 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       endpointUrl: null,
       advertisedHost: null,
     }),
+    getAgentSleepState: async () => ({
+      preventSleepWhileAgentIsRunning: false,
+      agentIsRunning: false,
+      sleepBlockerActive: false,
+    }),
+    setPreventSleepWhileAgentIsRunning: async (enabled) => ({
+      preventSleepWhileAgentIsRunning: enabled,
+      agentIsRunning: false,
+      sleepBlockerActive: false,
+    }),
+    setAgentRunningState: async (agentIsRunning) => ({
+      preventSleepWhileAgentIsRunning: false,
+      agentIsRunning,
+      sleepBlockerActive: false,
+    }),
     pickFolder: async () => null,
     confirm: async () => true,
     setTheme: async () => undefined,

@@ -4,10 +4,12 @@ import type { DesktopServerExposureMode } from "@t3tools/contracts";
 
 export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
+  readonly preventSleepWhileAgentIsRunning: boolean;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
+  preventSleepWhileAgentIsRunning: false,
 };
 
 export function setDesktopServerExposurePreference(
@@ -22,6 +24,18 @@ export function setDesktopServerExposurePreference(
       };
 }
 
+export function setDesktopPreventSleepWhileAgentIsRunningPreference(
+  settings: DesktopSettings,
+  enabled: boolean,
+): DesktopSettings {
+  return settings.preventSleepWhileAgentIsRunning === enabled
+    ? settings
+    : {
+        ...settings,
+        preventSleepWhileAgentIsRunning: enabled,
+      };
+}
+
 export function readDesktopSettings(settingsPath: string): DesktopSettings {
   try {
     if (!FS.existsSync(settingsPath)) {
@@ -31,11 +45,13 @@ export function readDesktopSettings(settingsPath: string): DesktopSettings {
     const raw = FS.readFileSync(settingsPath, "utf8");
     const parsed = JSON.parse(raw) as {
       readonly serverExposureMode?: unknown;
+      readonly preventSleepWhileAgentIsRunning?: unknown;
     };
 
     return {
       serverExposureMode:
         parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
+      preventSleepWhileAgentIsRunning: parsed.preventSleepWhileAgentIsRunning === true,
     };
   } catch {
     return DEFAULT_DESKTOP_SETTINGS;

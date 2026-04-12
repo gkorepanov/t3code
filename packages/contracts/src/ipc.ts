@@ -131,6 +131,12 @@ export interface DesktopServerExposureState {
   advertisedHost: string | null;
 }
 
+export interface DesktopAgentSleepState {
+  preventSleepWhileAgentIsRunning: boolean;
+  agentIsRunning: boolean;
+  sleepBlockerActive: boolean;
+}
+
 export interface DesktopBridge {
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
   getClientSettings: () => Promise<ClientSettings | null>;
@@ -144,6 +150,9 @@ export interface DesktopBridge {
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
+  getAgentSleepState: () => Promise<DesktopAgentSleepState>;
+  setPreventSleepWhileAgentIsRunning: (enabled: boolean) => Promise<DesktopAgentSleepState>;
+  setAgentRunningState: (agentIsRunning: boolean) => Promise<DesktopAgentSleepState>;
   pickFolder: () => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;

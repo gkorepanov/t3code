@@ -17,6 +17,7 @@ import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
   selectEnvironmentState,
+  selectHasRunningAgentTurn,
   selectProjectsAcrossEnvironments,
   selectThreadByRef,
   selectThreadExistsByRef,
@@ -218,6 +219,10 @@ function projectsOf(state: AppState) {
 
 function threadsOf(state: AppState) {
   return selectThreadsAcrossEnvironments(state);
+}
+
+function hasRunningAgentTurn(state: AppState) {
+  return selectHasRunningAgentTurn(state);
 }
 
 function makeEvent<T extends OrchestrationEvent["type"]>(
@@ -494,6 +499,35 @@ describe("store read model sync", () => {
     );
 
     expect(localEnvironmentStateOf(next).bootstrapComplete).toBe(true);
+  });
+
+  it("detects whether any thread currently has a running agent turn", () => {
+    const idleState = makeState(
+      makeThread({
+        session: {
+          provider: "codex",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-02-13T00:00:00.000Z",
+          updatedAt: "2026-02-13T00:00:00.000Z",
+        },
+      }),
+    );
+    expect(hasRunningAgentTurn(idleState)).toBe(false);
+
+    const runningState = makeState(
+      makeThread({
+        session: {
+          provider: "codex",
+          status: "running",
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-13T00:00:00.000Z",
+          updatedAt: "2026-02-13T00:00:00.000Z",
+        },
+      }),
+    );
+    expect(hasRunningAgentTurn(runningState)).toBe(true);
   });
 
   it("preserves claude model slugs without an active session", () => {

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettings,
+  setDesktopPreventSleepWhileAgentIsRunningPreference,
   setDesktopServerExposurePreference,
   writeDesktopSettings,
 } from "./desktopSettings";
@@ -35,10 +36,12 @@ describe("desktopSettings", () => {
 
     writeDesktopSettings(settingsPath, {
       serverExposureMode: "network-accessible",
+      preventSleepWhileAgentIsRunning: true,
     });
 
     expect(readDesktopSettings(settingsPath)).toEqual({
       serverExposureMode: "network-accessible",
+      preventSleepWhileAgentIsRunning: true,
     });
   });
 
@@ -47,11 +50,28 @@ describe("desktopSettings", () => {
       setDesktopServerExposurePreference(
         {
           serverExposureMode: "local-only",
+          preventSleepWhileAgentIsRunning: false,
         },
         "network-accessible",
       ),
     ).toEqual({
       serverExposureMode: "network-accessible",
+      preventSleepWhileAgentIsRunning: false,
+    });
+  });
+
+  it("updates the agent sleep-prevention preference without disturbing other desktop settings", () => {
+    expect(
+      setDesktopPreventSleepWhileAgentIsRunningPreference(
+        {
+          serverExposureMode: "network-accessible",
+          preventSleepWhileAgentIsRunning: false,
+        },
+        true,
+      ),
+    ).toEqual({
+      serverExposureMode: "network-accessible",
+      preventSleepWhileAgentIsRunning: true,
     });
   });
 

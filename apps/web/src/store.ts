@@ -1533,6 +1533,14 @@ export function selectThreadShellsAcrossEnvironments(state: AppState): ThreadShe
   );
 }
 
+export function selectHasRunningAgentTurn(state: AppState): boolean {
+  return getEnvironmentEntries(state).some(([, environmentState]) =>
+    Object.values(environmentState.threadSessionById).some(
+      (session) => session?.status === "running" && session.activeTurnId != null,
+    ),
+  );
+}
+
 export function selectSidebarThreadsAcrossEnvironments(state: AppState): SidebarThreadSummary[] {
   return getEnvironmentEntries(state).flatMap(([environmentId, environmentState]) =>
     environmentState.threadIds.flatMap((threadId) => {
