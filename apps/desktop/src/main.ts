@@ -1800,24 +1800,27 @@ function registerIpcHandlers(): void {
       ...(owner ? { parent: owner, modal: true } : {}),
       webPreferences: { sandbox: true },
     });
-    const authOrigin = new URL(authUrl).origin;
-    let sawForeignOrigin = false;
-    const maybeClose = (url: string) => {
-      const origin = new URL(url).origin;
-      sawForeignOrigin ||= origin !== authOrigin;
-      if (sawForeignOrigin && origin === authOrigin && !authWindow.isDestroyed()) {
-        authWindow.close();
-      }
-    };
-
-    authWindow.webContents.on("did-navigate", (_event, url) => maybeClose(url));
-    authWindow.webContents.on("did-redirect-navigation", (_event, url) => maybeClose(url));
     try {
+      const waitForAuthCookie = async () => {
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline) {
+          const cookies = await authWindow.webContents.session.cookies.get({ url: authUrl });
+          if (cookies.some((cookie) => cookie.name === "CF_Authorization")) {
+            return true;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        return false;
+      };
       const closed = new Promise<boolean>((resolve) =>
-        authWindow.once("closed", () => resolve(true)),
+        authWindow.once("closed", () => resolve(false)),
       );
       await authWindow.loadURL(authUrl);
-      return await closed;
+      const authenticated = await Promise.race([waitForAuthCookie(), closed]);
+      if (!authWindow.isDestroyed()) {
+        authWindow.close();
+      }
+      return authenticated;
     } catch {
       authWindow.destroy();
       return false;

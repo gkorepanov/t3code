@@ -28,10 +28,14 @@ const respondToOrchestrationHttpError = (
     return HttpServerResponse.jsonUnsafe({ error: error.message }, { status: 400 });
   });
 
-const authenticateOwnerSession = Effect.gen(function* () {
+const authenticateSession = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const serverAuth = yield* ServerAuth;
-  const session = yield* serverAuth.authenticateHttpRequest(request);
+  return yield* serverAuth.authenticateHttpRequest(request);
+});
+
+const authenticateOwnerSession = Effect.gen(function* () {
+  const session = yield* authenticateSession;
   if (session.role !== "owner") {
     return yield* new OrchestrationDispatchCommandError({
       message: "Only owner sessions can manage projects.",
@@ -44,7 +48,7 @@ export const orchestrationSnapshotRouteLayer = HttpRouter.add(
   "GET",
   "/api/orchestration/snapshot",
   Effect.gen(function* () {
-    yield* authenticateOwnerSession;
+    yield* authenticateSession;
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const snapshot = yield* projectionSnapshotQuery.getSnapshot().pipe(
       Effect.mapError(
@@ -58,10 +62,7 @@ export const orchestrationSnapshotRouteLayer = HttpRouter.add(
     return HttpServerResponse.jsonUnsafe(snapshot satisfies OrchestrationReadModel, {
       status: 200,
     });
-  }).pipe(
-    Effect.catchTag("OrchestrationDispatchCommandError", respondToOrchestrationHttpError),
-    Effect.catchTag("OrchestrationGetSnapshotError", respondToOrchestrationHttpError),
-  ),
+  }).pipe(Effect.catchTag("OrchestrationGetSnapshotError", respondToOrchestrationHttpError)),
 );
 
 export const orchestrationShellSnapshotRouteLayer = HttpRouter.add(
