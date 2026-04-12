@@ -9,9 +9,11 @@ import {
   XIcon,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type DesktopAgentSleepState,
   type DesktopUpdateChannel,
+  PROVIDER_DISPLAY_NAMES,
   type ScopedThreadRef,
   type ProviderKind,
   type ServerProvider,
@@ -223,6 +225,111 @@ function getProviderSummary(provider: ServerProvider | undefined) {
 function getProviderVersionLabel(version: string | null | undefined) {
   if (!version) return null;
   return version.startsWith("v") ? version : `v${version}`;
+}
+
+function DesktopAgentSleepSettingsRow() {
+  const desktopBridge = typeof window === "undefined" ? undefined : window.desktopBridge;
+  const desktopAgentSleepBridge =
+    desktopBridge &&
+    typeof desktopBridge.getAgentSleepState === "function" &&
+    typeof desktopBridge.setPreventSleepWhileAgentIsRunning === "function"
+      ? desktopBridge
+      : null;
+  const [desktopAgentSleepState, setDesktopAgentSleepState] =
+    useState<DesktopAgentSleepState | null>(null);
+  const [isUpdatingDesktopAgentSleepSetting, setIsUpdatingDesktopAgentSleepSetting] =
+    useState(false);
+
+  useEffect(() => {
+    if (!desktopAgentSleepBridge) {
+      return;
+    }
+
+    let cancelled = false;
+    void desktopAgentSleepBridge
+      .getAgentSleepState()
+      .then((state) => {
+        if (!cancelled) {
+          setDesktopAgentSleepState(state);
+        }
+      })
+      .catch((error) => {
+        console.error("[DESKTOP_AGENT_SLEEP] hydrate failed", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopAgentSleepBridge]);
+
+  const persistDesktopAgentSleepSetting = useCallback(
+    (enabled: boolean) => {
+      if (!desktopAgentSleepBridge) {
+        return;
+      }
+
+      const previousState = desktopAgentSleepState;
+      if (previousState) {
+        setDesktopAgentSleepState({
+          ...previousState,
+          preventSleepWhileAgentIsRunning: enabled,
+          sleepBlockerActive: enabled && previousState.agentIsRunning,
+        });
+      }
+      setIsUpdatingDesktopAgentSleepSetting(true);
+
+      void desktopAgentSleepBridge
+        .setPreventSleepWhileAgentIsRunning(enabled)
+        .then((state) => {
+          setDesktopAgentSleepState(state);
+        })
+        .catch((error) => {
+          console.error("[DESKTOP_AGENT_SLEEP] persist failed", error);
+          if (previousState) {
+            setDesktopAgentSleepState(previousState);
+          }
+        })
+        .finally(() => {
+          setIsUpdatingDesktopAgentSleepSetting(false);
+        });
+    },
+    [desktopAgentSleepBridge, desktopAgentSleepState],
+  );
+
+  if (!desktopAgentSleepBridge) {
+    return null;
+  }
+
+  const preventSleepWhileAgentIsRunning =
+    desktopAgentSleepState?.preventSleepWhileAgentIsRunning ?? false;
+
+  return (
+    <SettingsRow
+      title="Prevent system sleep"
+      description="Keep this computer awake while an agent is running. The display can still sleep or stay locked."
+      status={
+        desktopAgentSleepState?.sleepBlockerActive ? (
+          <span className="text-[11px] text-muted-foreground">Active for the current run.</span>
+        ) : null
+      }
+      resetAction={
+        preventSleepWhileAgentIsRunning ? (
+          <SettingResetButton
+            label="prevent system sleep"
+            onClick={() => persistDesktopAgentSleepSetting(false)}
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={preventSleepWhileAgentIsRunning}
+          disabled={desktopAgentSleepState === null || isUpdatingDesktopAgentSleepSetting}
+          onCheckedChange={(checked) => persistDesktopAgentSleepSetting(Boolean(checked))}
+          aria-label="Prevent system sleep while agent is running"
+        />
+      }
+    />
+  );
 }
 
 function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
@@ -958,6 +1065,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <DesktopAgentSleepSettingsRow />
 
         <SettingsRow
           title="Task sidebar"

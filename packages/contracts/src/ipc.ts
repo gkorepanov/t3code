@@ -147,6 +147,12 @@ export interface PickFolderOptions {
   initialPath?: string | null;
 }
 
+export interface DesktopAgentSleepState {
+  preventSleepWhileAgentIsRunning: boolean;
+  agentIsRunning: boolean;
+  sleepBlockerActive: boolean;
+}
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -161,6 +167,9 @@ export interface DesktopBridge {
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
+  getAgentSleepState: () => Promise<DesktopAgentSleepState>;
+  setPreventSleepWhileAgentIsRunning: (enabled: boolean) => Promise<DesktopAgentSleepState>;
+  setAgentRunningState: (agentIsRunning: boolean) => Promise<DesktopAgentSleepState>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;

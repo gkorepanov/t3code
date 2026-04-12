@@ -8,12 +8,14 @@ export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
+  readonly preventSleepWhileAgentIsRunning: boolean;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
+  preventSleepWhileAgentIsRunning: false,
 };
 
 export function resolveDefaultDesktopSettings(appVersion: string): DesktopSettings {
@@ -46,6 +48,18 @@ export function setDesktopUpdateChannelPreference(
   };
 }
 
+export function setDesktopPreventSleepWhileAgentIsRunningPreference(
+  settings: DesktopSettings,
+  enabled: boolean,
+): DesktopSettings {
+  return settings.preventSleepWhileAgentIsRunning === enabled
+    ? settings
+    : {
+        ...settings,
+        preventSleepWhileAgentIsRunning: enabled,
+      };
+}
+
 export function readDesktopSettings(settingsPath: string, appVersion: string): DesktopSettings {
   const defaultSettings = resolveDefaultDesktopSettings(appVersion);
 
@@ -59,6 +73,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
       readonly serverExposureMode?: unknown;
       readonly updateChannel?: unknown;
       readonly updateChannelConfiguredByUser?: unknown;
+      readonly preventSleepWhileAgentIsRunning?: unknown;
     };
     const parsedUpdateChannel =
       parsed.updateChannel === "nightly" || parsed.updateChannel === "latest"
@@ -77,6 +92,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
           ? parsedUpdateChannel
           : defaultSettings.updateChannel,
       updateChannelConfiguredByUser,
+      preventSleepWhileAgentIsRunning: parsed.preventSleepWhileAgentIsRunning === true,
     };
   } catch {
     return defaultSettings;

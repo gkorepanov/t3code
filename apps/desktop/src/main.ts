@@ -14,6 +14,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  powerSaveBlocker,
   protocol,
   safeStorage,
   shell,
@@ -21,6 +22,7 @@ import {
 import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
 import type {
   ClientSettings,
+  DesktopAgentSleepState,
   DesktopTheme,
   DesktopAppBranding,
   DesktopServerExposureMode,
@@ -40,10 +42,12 @@ import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backe
 import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettings,
+  setDesktopPreventSleepWhileAgentIsRunningPreference,
   setDesktopServerExposurePreference,
   setDesktopUpdateChannelPreference,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
+import { createAgentSleepBlockerController } from "./agentSleepBlocker.ts";
 import {
   readClientSettings,
   readSavedEnvironmentRegistry,
@@ -103,6 +107,10 @@ const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secr
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
+const GET_AGENT_SLEEP_STATE_CHANNEL = "desktop:get-agent-sleep-state";
+const SET_PREVENT_SLEEP_WHILE_AGENT_IS_RUNNING_CHANNEL =
+  "desktop:set-prevent-sleep-while-agent-is-running";
+const SET_AGENT_RUNNING_STATE_CHANNEL = "desktop:set-agent-running-state";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
@@ -225,6 +233,11 @@ let restoreStdIoCapture: (() => void) | null = null;
 let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
 let desktopSettings = readDesktopSettings(DESKTOP_SETTINGS_PATH, app.getVersion());
 let desktopServerExposureMode: DesktopServerExposureMode = desktopSettings.serverExposureMode;
+const agentSleepBlocker = createAgentSleepBlockerController({
+  powerSaveBlocker,
+  preventSleepWhileAgentIsRunning: desktopSettings.preventSleepWhileAgentIsRunning,
+  log: (message) => writeDesktopLogHeader(message),
+});
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const expectedBackendExitChildren = new WeakSet<ChildProcess.ChildProcess>();
@@ -309,6 +322,10 @@ function getDesktopServerExposureState(): DesktopServerExposureState {
   };
 }
 
+function getDesktopAgentSleepState(): DesktopAgentSleepState {
+  return agentSleepBlocker.getState();
+}
+
 function getDesktopSecretStorage() {
   return {
     isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -360,6 +377,22 @@ async function applyDesktopServerExposureMode(
   }
 
   return getDesktopServerExposureState();
+}
+
+function applyPreventSleepWhileAgentIsRunningPreference(
+  enabled: boolean,
+  options?: { readonly persist?: boolean },
+): DesktopAgentSleepState {
+  const nextState = agentSleepBlocker.setPreventSleepWhileAgentIsRunning(enabled);
+  desktopSettings = setDesktopPreventSleepWhileAgentIsRunningPreference(desktopSettings, enabled);
+  if (options?.persist) {
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+  }
+  return nextState;
+}
+
+function setDesktopAgentRunningState(agentIsRunning: boolean): DesktopAgentSleepState {
+  return agentSleepBlocker.setAgentRunningState(agentIsRunning);
 }
 
 function relaunchDesktopApp(reason: string): void {
@@ -1670,6 +1703,32 @@ function registerIpcHandlers(): void {
     return nextState;
   });
 
+  ipcMain.removeHandler(GET_AGENT_SLEEP_STATE_CHANNEL);
+  ipcMain.handle(GET_AGENT_SLEEP_STATE_CHANNEL, async () => getDesktopAgentSleepState());
+
+  ipcMain.removeHandler(SET_PREVENT_SLEEP_WHILE_AGENT_IS_RUNNING_CHANNEL);
+  ipcMain.handle(
+    SET_PREVENT_SLEEP_WHILE_AGENT_IS_RUNNING_CHANNEL,
+    async (_event, rawEnabled: unknown) => {
+      if (typeof rawEnabled !== "boolean") {
+        throw new Error("Invalid desktop agent sleep preference.");
+      }
+
+      return applyPreventSleepWhileAgentIsRunningPreference(rawEnabled, {
+        persist: true,
+      });
+    },
+  );
+
+  ipcMain.removeHandler(SET_AGENT_RUNNING_STATE_CHANNEL);
+  ipcMain.handle(SET_AGENT_RUNNING_STATE_CHANNEL, async (_event, rawAgentIsRunning: unknown) => {
+    if (typeof rawAgentIsRunning !== "boolean") {
+      throw new Error("Invalid desktop agent running state.");
+    }
+
+    return setDesktopAgentRunningState(rawAgentIsRunning);
+  });
+
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
@@ -2150,6 +2209,7 @@ app.on("before-quit", () => {
   isQuitting = true;
   updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
+  agentSleepBlocker.dispose();
   clearUpdatePollTimer();
   cancelBackendReadinessWait();
   stopBackend();
@@ -2189,6 +2249,7 @@ app
   });
 
 app.on("window-all-closed", () => {
+  setDesktopAgentRunningState(false);
   if (process.platform !== "darwin" && !isQuitting) {
     app.quit();
   }
@@ -2199,6 +2260,7 @@ if (process.platform !== "win32") {
     if (isQuitting) return;
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
+    agentSleepBlocker.dispose();
     clearUpdatePollTimer();
     cancelBackendReadinessWait();
     stopBackend();
@@ -2210,6 +2272,7 @@ if (process.platform !== "win32") {
     if (isQuitting) return;
     isQuitting = true;
     writeDesktopLogHeader("SIGTERM received");
+    agentSleepBlocker.dispose();
     clearUpdatePollTimer();
     stopBackend();
     restoreStdIoCapture?.();

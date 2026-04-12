@@ -8,6 +8,7 @@ import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettings,
   resolveDefaultDesktopSettings,
+  setDesktopPreventSleepWhileAgentIsRunningPreference,
   setDesktopServerExposurePreference,
   setDesktopUpdateChannelPreference,
   writeDesktopSettings,
@@ -37,6 +38,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      preventSleepWhileAgentIsRunning: false,
     });
   });
 
@@ -47,12 +49,14 @@ describe("desktopSettings", () => {
       serverExposureMode: "network-accessible",
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      preventSleepWhileAgentIsRunning: true,
     });
 
     expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
       serverExposureMode: "network-accessible",
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      preventSleepWhileAgentIsRunning: true,
     });
   });
 
@@ -63,6 +67,7 @@ describe("desktopSettings", () => {
           serverExposureMode: "local-only",
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          preventSleepWhileAgentIsRunning: false,
         },
         "network-accessible",
       ),
@@ -70,6 +75,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "network-accessible",
       updateChannel: "latest",
       updateChannelConfiguredByUser: false,
+      preventSleepWhileAgentIsRunning: false,
     });
   });
 
@@ -80,6 +86,7 @@ describe("desktopSettings", () => {
           serverExposureMode: "local-only",
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          preventSleepWhileAgentIsRunning: false,
         },
         "nightly",
       ),
@@ -87,6 +94,26 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: true,
+      preventSleepWhileAgentIsRunning: false,
+    });
+  });
+
+  it("updates the agent sleep-prevention preference without disturbing other desktop settings", () => {
+    expect(
+      setDesktopPreventSleepWhileAgentIsRunningPreference(
+        {
+          serverExposureMode: "network-accessible",
+          updateChannel: "nightly",
+          updateChannelConfiguredByUser: true,
+          preventSleepWhileAgentIsRunning: false,
+        },
+        true,
+      ),
+    ).toEqual({
+      serverExposureMode: "network-accessible",
+      updateChannel: "nightly",
+      updateChannelConfiguredByUser: true,
+      preventSleepWhileAgentIsRunning: true,
     });
   });
 
@@ -105,6 +132,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      preventSleepWhileAgentIsRunning: false,
     });
   });
 
@@ -123,6 +151,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      preventSleepWhileAgentIsRunning: false,
     });
   });
 
@@ -142,6 +171,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      preventSleepWhileAgentIsRunning: false,
     });
   });
 });
