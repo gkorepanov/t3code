@@ -524,6 +524,7 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
   const localApi = readLocalApi();
   const [activeFilePreview, setActiveFilePreview] = useState<{
     browserHref: string;
+    environmentId?: EnvironmentId;
     targetPath: string;
   } | null>(null);
   const editorRemoteHost = useSavedEnvironmentRegistryStore((state) =>
@@ -554,9 +555,12 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
   }, [markdownFileLinkMetaByHref]);
   const handlePreviewFile = useCallback(
     (preview: { browserHref: string; targetPath: string }) => {
-      setActiveFilePreview(preview);
+      setActiveFilePreview({
+        ...preview,
+        ...(environmentId ? { environmentId } : {}),
+      });
     },
-    [],
+    [environmentId],
   );
   const markdownUrlTransform = useCallback((href: string) => {
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);

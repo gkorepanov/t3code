@@ -1,5 +1,10 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
+import {
+  getSavedEnvironmentRecord,
+  readSavedEnvironmentBearerToken,
+} from "../environments/runtime";
 import { readLocalApi } from "../localApi";
 import { Button } from "./ui/button";
 import {
@@ -22,6 +27,7 @@ const POSITION_SUFFIX_PATTERN = /:\d+(?::\d+)?$/;
 
 export interface ChatMarkdownFilePreviewTarget {
   readonly browserHref: string;
+  readonly environmentId?: EnvironmentId;
   readonly targetPath: string;
 }
 
@@ -48,6 +54,26 @@ function looksLikeTextFile(targetPath: string, contentType: string | null): bool
 
 function resolveBrowserPreviewUrl(browserHref: string): string {
   return new URL(browserHref, window.location.href).toString();
+}
+
+export async function resolveMarkdownFilePreviewRequestInit(
+  preview: ChatMarkdownFilePreviewTarget,
+): Promise<Pick<RequestInit, "credentials" | "headers">> {
+  if (!preview.environmentId || !getSavedEnvironmentRecord(preview.environmentId)) {
+    return { credentials: "include" };
+  }
+
+  const bearerToken = await readSavedEnvironmentBearerToken(preview.environmentId);
+  if (!bearerToken) {
+    return { credentials: "include" };
+  }
+
+  return {
+    credentials: "include",
+    headers: {
+      authorization: `Bearer ${bearerToken}`,
+    },
+  };
 }
 
 async function readPreviewText(
@@ -110,10 +136,13 @@ export function ChatMarkdownFilePreviewDialog({
     setState({ status: "loading" });
     const previewUrl = resolveBrowserPreviewUrl(preview.browserHref);
 
-    void fetch(previewUrl, {
-      credentials: "include",
-      signal: controller.signal,
-    })
+    void resolveMarkdownFilePreviewRequestInit(preview)
+      .then((requestInit) =>
+        fetch(previewUrl, {
+          ...requestInit,
+          signal: controller.signal,
+        }),
+      )
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`Failed to load preview (${response.status}).`);
