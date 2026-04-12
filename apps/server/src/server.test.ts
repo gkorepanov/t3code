@@ -956,7 +956,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
 
         assert.equal(response.status, 204);
-        assert.equal(response.headers.get("access-control-allow-origin"), "*");
+        assert.equal(
+          response.headers.get("access-control-allow-origin"),
+          "http://192.168.86.35:3773",
+        );
+        assert.equal(response.headers.get("access-control-allow-credentials"), "true");
         assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-methods")), [
           "GET",
           "OPTIONS",
@@ -989,7 +993,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       };
 
       assert.equal(response.status, 401);
-      assert.equal(response.headers.get("access-control-allow-origin"), "*");
+      assert.equal(
+        response.headers.get("access-control-allow-origin"),
+        "http://192.168.86.35:3773",
+      );
+      assert.equal(response.headers.get("access-control-allow-credentials"), "true");
       assert.equal(body.error, "Authentication required.");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -1582,7 +1590,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       assert.equal(response.status, 204);
-      assert.equal(response.headers["access-control-allow-origin"], "*");
+      assert.equal(response.headers["access-control-allow-origin"], "http://localhost:5733");
+      assert.equal(response.headers["access-control-allow-credentials"], "true");
       assert.deepEqual(localTraceRecords, [
         {
           type: "otlp-span",
@@ -1647,7 +1656,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(response.status, 204);
-      assert.equal(response.headers.get("access-control-allow-origin"), "*");
+      assert.equal(response.headers.get("access-control-allow-origin"), "http://localhost:5733");
+      assert.equal(response.headers.get("access-control-allow-credentials"), "true");
       assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-methods")), [
         "GET",
         "OPTIONS",
