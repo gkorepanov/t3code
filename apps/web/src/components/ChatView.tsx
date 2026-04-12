@@ -89,6 +89,7 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -3278,6 +3279,8 @@ export default function ChatView(props: ChatViewProps) {
     [onRevertToTurnCount, revertTurnCountByUserMessageId],
   );
 
+  const isMobile = useIsMobile();
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -3394,7 +3397,12 @@ export default function ChatView(props: ChatViewProps) {
           </div>
 
           {/* Input bar */}
-          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+          <div
+            className={cn(
+              "px-3 pt-1.5 sm:px-5 sm:pt-2",
+              isGitRepo ? (isMobile ? "pb-2" : "pb-1") : isMobile ? "pb-4 sm:pb-4" : "pb-3 sm:pb-4",
+            )}
+          >
             <ChatComposer
               ref={composerRef}
               composerDraftTarget={composerDraftTarget}

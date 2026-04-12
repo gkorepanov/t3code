@@ -14,6 +14,7 @@ import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { Separator } from "./ui/separator";
+import { useIsMobile } from "~/hooks/useMediaQuery";
 
 interface BranchToolbarProps {
   environmentId: EnvironmentId;
@@ -38,6 +39,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   availableEnvironments,
   onEnvironmentChange,
 }: BranchToolbarProps) {
+  const isMobile = useIsMobile();
   const threadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -72,7 +74,13 @@ export const BranchToolbar = memo(function BranchToolbar({
   if (!hasActiveThread || !activeProject) return null;
 
   return (
-    <div className="mx-auto flex w-full max-w-208 items-center justify-between px-2.5 pb-3 pt-1 sm:px-3">
+    <div
+      className={
+        isMobile
+          ? "mx-auto flex w-full max-w-208 items-center justify-between px-2.5 pb-4 pt-1 sm:px-3 sm:pb-3"
+          : "mx-auto flex w-full max-w-208 items-center justify-between px-2.5 pb-3 pt-1 sm:px-3"
+      }
+    >
       <div className="flex items-center gap-1">
         {showEnvironmentPicker && (
           <>
