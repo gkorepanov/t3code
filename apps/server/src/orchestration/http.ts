@@ -7,15 +7,22 @@ import {
 import { Effect } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import { ServerAuth } from "../auth/Services/ServerAuth.ts";
+import { AuthError, ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { normalizeDispatchCommand } from "./Normalizer.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
 const respondToOrchestrationHttpError = (
-  error: OrchestrationDispatchCommandError | OrchestrationGetSnapshotError,
+  error: AuthError | OrchestrationDispatchCommandError | OrchestrationGetSnapshotError,
 ) =>
   Effect.gen(function* () {
+    if (error._tag === "AuthError") {
+      return HttpServerResponse.jsonUnsafe(
+        { error: error.message },
+        { status: error.status ?? 500 },
+      );
+    }
+
     if (error._tag === "OrchestrationGetSnapshotError") {
       yield* Effect.logError("orchestration http route failed", {
         message: error.message,
@@ -61,7 +68,10 @@ export const orchestrationSnapshotRouteLayer = HttpRouter.add(
     return HttpServerResponse.jsonUnsafe(snapshot satisfies OrchestrationReadModel, {
       status: 200,
     });
-  }).pipe(Effect.catchTag("OrchestrationGetSnapshotError", respondToOrchestrationHttpError)),
+  }).pipe(
+    Effect.catchTag("AuthError", respondToOrchestrationHttpError),
+    Effect.catchTag("OrchestrationGetSnapshotError", respondToOrchestrationHttpError),
+  ),
 );
 
 export const orchestrationDispatchRouteLayer = HttpRouter.add(

@@ -366,19 +366,31 @@ async function refreshSavedEnvironmentMetadata(
   roleHint?: AuthSessionRole | null,
   configHint?: ServerConfig | null,
 ): Promise<void> {
-  const [serverConfig, sessionState] = await Promise.all([
-    configHint ? Promise.resolve(configHint) : client.server.getConfig(),
-    fetchRemoteSessionState({
-      httpBaseUrl: record.httpBaseUrl,
-      bearerToken,
-    }),
-  ]);
+  let sessionState = await fetchRemoteSessionState({
+    httpBaseUrl: record.httpBaseUrl,
+    bearerToken,
+  });
+  if (!sessionState.authenticated && window.desktopBridge?.openAuthWindow) {
+    const opened = await window.desktopBridge.openAuthWindow(record.httpBaseUrl);
+    if (opened) {
+      sessionState = await fetchRemoteSessionState({
+        httpBaseUrl: record.httpBaseUrl,
+        bearerToken,
+      });
+    }
+  }
+  if (!sessionState.authenticated) {
+    throw new Error("Remote environment requires authentication.");
+  }
+  const serverConfig = configHint
+    ? await Promise.resolve(configHint)
+    : await client.server.getConfig();
 
   useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
-    authState: sessionState.authenticated ? "authenticated" : "requires-auth",
+    authState: "authenticated",
     descriptor: serverConfig.environment,
     serverConfig,
-    role: sessionState.authenticated ? (sessionState.role ?? roleHint ?? null) : null,
+    role: sessionState.role ?? roleHint ?? null,
   });
 }
 
