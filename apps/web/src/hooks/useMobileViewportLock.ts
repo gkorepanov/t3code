@@ -1,10 +1,13 @@
 import { useEffect, useMemo, type CSSProperties } from "react";
 import { useMediaQuery } from "./useMediaQuery";
 
+const MOBILE_APP_BOTTOM_OFFSET = "max(env(safe-area-inset-bottom), 16px)";
+
 const LOCKED_VIEWPORT_STYLE: CSSProperties = {
   inset: "0",
   height: "var(--mobile-app-height)",
   overflow: "hidden",
+  paddingBottom: "var(--mobile-app-bottom-offset, 0px)",
   position: "fixed",
   width: "100%",
 };
@@ -15,6 +18,7 @@ export function useMobileViewportLock(): CSSProperties | undefined {
   useEffect(() => {
     if (!shouldLockViewport) {
       document.documentElement.style.removeProperty("--mobile-app-height");
+      document.documentElement.style.removeProperty("--mobile-app-bottom-offset");
       return;
     }
 
@@ -29,6 +33,10 @@ export function useMobileViewportLock(): CSSProperties | undefined {
       clampWindowScroll();
     };
 
+    document.documentElement.style.setProperty(
+      "--mobile-app-bottom-offset",
+      MOBILE_APP_BOTTOM_OFFSET,
+    );
     syncViewportHeight();
     window.addEventListener("scroll", clampWindowScroll, { passive: true });
     window.addEventListener("resize", syncViewportHeight);
@@ -41,6 +49,7 @@ export function useMobileViewportLock(): CSSProperties | undefined {
       window.visualViewport?.removeEventListener("resize", syncViewportHeight);
       window.visualViewport?.removeEventListener("scroll", syncViewportHeight);
       document.documentElement.style.removeProperty("--mobile-app-height");
+      document.documentElement.style.removeProperty("--mobile-app-bottom-offset");
     };
   }, [shouldLockViewport]);
 
