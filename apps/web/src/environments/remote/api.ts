@@ -50,13 +50,14 @@ async function fetchRemoteJson<T>(input: {
   readonly method?: "GET" | "POST";
   readonly bearerToken?: string;
   readonly body?: unknown;
+  readonly credentials?: RequestCredentials;
 }): Promise<T> {
   const requestUrl = remoteEndpointUrl(input.httpBaseUrl, input.pathname);
   let response: Response;
   try {
     response = await fetch(requestUrl, {
       method: input.method ?? "GET",
-      credentials: "include",
+      credentials: input.credentials ?? "include",
       headers: {
         ...(input.body !== undefined ? { "content-type": "application/json" } : {}),
         ...(input.bearerToken ? { authorization: `Bearer ${input.bearerToken}` } : {}),
