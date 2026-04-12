@@ -4,12 +4,12 @@ import { useMediaQuery } from "./useMediaQuery";
 const MOBILE_APP_BOTTOM_OFFSET = "max(env(safe-area-inset-bottom), 16px)";
 
 const LOCKED_VIEWPORT_STYLE: CSSProperties = {
-  inset: "0",
-  height: "var(--mobile-app-height)",
+  height: "calc(var(--mobile-app-height) - var(--mobile-app-bottom-offset, 0px))",
+  left: "0",
   overflow: "hidden",
-  paddingBottom: "var(--mobile-app-bottom-offset, 0px)",
   position: "fixed",
-  width: "100%",
+  right: "0",
+  top: "0",
 };
 
 export function useMobileViewportLock(): CSSProperties | undefined {
