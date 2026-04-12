@@ -10,6 +10,7 @@ vi.mock("../environments/runtime", () => ({
 import {
   resolveMarkdownFileLinkBehavior,
   resolveMarkdownFilePlainClickAction,
+  resolveMarkdownFileUrlBehavior,
   shouldHandleMarkdownFileLinkClick,
   shouldPreviewMarkdownFileLinkClick,
 } from "./chatMarkdownLinkBehavior";
@@ -126,6 +127,35 @@ describe("resolveMarkdownFileLinkBehavior", () => {
       interceptsPlainClick: true,
       remoteEditorHref: null,
       targetPath: "/home/julius/project/src/main.ts:42",
+    });
+  });
+});
+
+describe("resolveMarkdownFileUrlBehavior", () => {
+  it("rewrites relative markdown image paths to browser file urls", () => {
+    expect(
+      resolveMarkdownFileUrlBehavior({
+        cwd: "/home/julius/project",
+        environmentId: undefined,
+        href: "outputs/plots/sine.png",
+      }),
+    ).toEqual({
+      browserHref: "/file/home/julius/project/outputs/plots/sine.png",
+      targetPath: "/home/julius/project/outputs/plots/sine.png",
+    });
+  });
+
+  it("uses the environment http base for markdown image previews", () => {
+    expect(
+      resolveMarkdownFileUrlBehavior({
+        cwd: "/home/julius/project",
+        environmentId: "environment-remote" as never,
+        href: "/home/julius/project/outputs/plots/sine.png",
+      }),
+    ).toEqual({
+      browserHref:
+        "https://environment-remote.example.com/file/home/julius/project/outputs/plots/sine.png",
+      targetPath: "/home/julius/project/outputs/plots/sine.png",
     });
   });
 });
