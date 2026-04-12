@@ -35,7 +35,9 @@ import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import {
   resolveMarkdownFileLinkBehavior,
   shouldHandleMarkdownFileLinkClick,
+  shouldPreviewMarkdownFileLinkClick,
 } from "./chatMarkdownLinkBehavior";
+import { ChatMarkdownFilePreviewDialog } from "./ChatMarkdownFilePreviewDialog";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -259,6 +261,7 @@ interface MarkdownFileLinkProps {
   remoteEditorHref: string | null;
   editorRemoteHost: string | null;
   interceptsPlainClick: boolean;
+  onPreview: (preview: { browserHref: string; targetPath: string }) => void;
   className?: string | undefined;
 }
 
@@ -352,6 +355,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   remoteEditorHref,
   editorRemoteHost,
   interceptsPlainClick,
+  onPreview,
   className,
 }: MarkdownFileLinkProps) {
   const handleOpen = useCallback(() => {
@@ -372,7 +376,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     void openInPreferredEditor(
       api,
       targetPath,
-      editorRemoteHost ? { remoteHost: editorRemoteHost, reuseWindow: true } : undefined,
+      {
+        ...(editorRemoteHost ? { remoteHost: editorRemoteHost } : {}),
+        reuseWindow: true,
+      },
     ).catch((error) => {
       toastManager.add(
         stackedThreadToast({
@@ -456,6 +463,12 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             href={href}
             className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, className)}
             onClick={(event) => {
+              if (shouldPreviewMarkdownFileLinkClick(event)) {
+                event.preventDefault();
+                event.stopPropagation();
+                onPreview({ browserHref: href, targetPath });
+                return;
+              }
               if (!shouldHandleMarkdownFileLinkClick(event)) return;
               if (!interceptsPlainClick) return;
               event.preventDefault();
@@ -500,6 +513,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.remoteEditorHref === next.remoteEditorHref &&
     previous.editorRemoteHost === next.editorRemoteHost &&
     previous.interceptsPlainClick === next.interceptsPlainClick &&
+    previous.onPreview === next.onPreview &&
     previous.className === next.className
   );
 }
@@ -508,6 +522,10 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
   const settings = useSettings();
   const browserFileLinkPrefix = settings.browserFileLinkPrefix;
   const localApi = readLocalApi();
+  const [activeFilePreview, setActiveFilePreview] = useState<{
+    browserHref: string;
+    targetPath: string;
+  } | null>(null);
   const editorRemoteHost = useSavedEnvironmentRegistryStore((state) =>
     environmentId && typeof window !== "undefined" && window.desktopBridge
       ? state.byId[environmentId]?.editorRemoteHost?.trim() || null
@@ -534,6 +552,12 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
     const filePaths = [...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath);
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [markdownFileLinkMetaByHref]);
+  const handlePreviewFile = useCallback(
+    (preview: { browserHref: string; targetPath: string }) => {
+      setActiveFilePreview(preview);
+    },
+    [],
+  );
   const markdownUrlTransform = useCallback((href: string) => {
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
@@ -545,6 +569,7 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
         const linkBehavior = resolveMarkdownFileLinkBehavior({
           browserFileLinkPrefix,
           cwd,
+          environmentId,
           hasNativeApi: localApi != null,
           href: normalizedHref,
           preferLocalEditorOpen: localApi != null && editorRemoteHost != null,
@@ -576,6 +601,7 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
             remoteEditorHref={linkBehavior.remoteEditorHref}
             editorRemoteHost={editorRemoteHost}
             interceptsPlainClick={linkBehavior.interceptsPlainClick}
+            onPreview={handlePreviewFile}
             className={props.className}
           />
         );
@@ -605,26 +631,34 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
     [
       diffThemeName,
       fileLinkParentSuffixByPath,
+      handlePreviewFile,
       isStreaming,
       markdownFileLinkMetaByHref,
       browserFileLinkPrefix,
       cwd,
       editorRemoteHost,
+      environmentId,
       localApi,
       resolvedTheme,
     ],
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
+    <>
+      <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={markdownComponents}
+          urlTransform={markdownUrlTransform}
+        >
+          {text}
+        </ReactMarkdown>
+      </div>
+      <ChatMarkdownFilePreviewDialog
+        preview={activeFilePreview}
+        onClose={() => setActiveFilePreview(null)}
+      />
+    </>
   );
 }
 

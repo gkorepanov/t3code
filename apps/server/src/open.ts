@@ -89,12 +89,13 @@ function resolveEditorOpenArgOverrides(
     return [];
   }
 
+  const baseArgs = reuseWindow ? ["-r"] : [];
   const normalizedRemoteHost = remoteHost?.trim();
   if (!normalizedRemoteHost) {
-    return [];
+    return baseArgs;
   }
 
-  return ["--remote", `ssh-remote+${normalizedRemoteHost}`, ...(reuseWindow ? ["-r"] : [])];
+  return ["--remote", `ssh-remote+${normalizedRemoteHost}`, ...baseArgs];
 }
 
 function resolveEditorArgs(

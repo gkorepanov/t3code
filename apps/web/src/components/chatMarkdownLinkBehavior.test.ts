@@ -1,8 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../environments/runtime", () => ({
+  resolveEnvironmentHttpUrl: vi.fn(
+    ({ environmentId, pathname }: { environmentId: string; pathname: string }) =>
+      `https://${environmentId}.example.com${pathname}`,
+  ),
+}));
 
 import {
   resolveMarkdownFileLinkBehavior,
+  resolveMarkdownFilePlainClickAction,
   shouldHandleMarkdownFileLinkClick,
+  shouldPreviewMarkdownFileLinkClick,
 } from "./chatMarkdownLinkBehavior";
 
 function event(overrides: Partial<MouseEvent> = {}): MouseEvent {
@@ -35,12 +44,27 @@ describe("shouldHandleMarkdownFileLinkClick", () => {
   });
 });
 
+describe("shouldPreviewMarkdownFileLinkClick", () => {
+  it("handles mod-clicks for preview", () => {
+    expect(shouldPreviewMarkdownFileLinkClick(event({ metaKey: true }), "MacIntel")).toBe(true);
+    expect(shouldPreviewMarkdownFileLinkClick(event({ ctrlKey: true }), "Linux")).toBe(true);
+  });
+
+  it("ignores plain clicks and shifted clicks", () => {
+    expect(shouldPreviewMarkdownFileLinkClick(event(), "MacIntel")).toBe(false);
+    expect(
+      shouldPreviewMarkdownFileLinkClick(event({ metaKey: true, shiftKey: true }), "MacIntel"),
+    ).toBe(false);
+  });
+});
+
 describe("resolveMarkdownFileLinkBehavior", () => {
   it("rewrites markdown file urls to browser-served absolute paths", () => {
     expect(
       resolveMarkdownFileLinkBehavior({
         browserFileLinkPrefix: "",
         cwd: "/home/julius/project",
+        environmentId: undefined,
         hasNativeApi: false,
         href: "file:///home/julius/project/src/main.ts",
       }),
@@ -57,6 +81,7 @@ describe("resolveMarkdownFileLinkBehavior", () => {
       resolveMarkdownFileLinkBehavior({
         browserFileLinkPrefix: "vscode://vscode-remote/ssh-remote+wf-gk/",
         cwd: "/home/julius/project",
+        environmentId: undefined,
         hasNativeApi: false,
         href: "src/main.ts:42",
       }),
@@ -74,6 +99,7 @@ describe("resolveMarkdownFileLinkBehavior", () => {
       resolveMarkdownFileLinkBehavior({
         browserFileLinkPrefix: "vscode://vscode-remote/ssh-remote+wf-gk/",
         cwd: "/home/julius/project",
+        environmentId: undefined,
         hasNativeApi: true,
         href: "src/main.ts:42",
         preferLocalEditorOpen: true,
@@ -84,5 +110,42 @@ describe("resolveMarkdownFileLinkBehavior", () => {
       remoteEditorHref: null,
       targetPath: "/home/julius/project/src/main.ts:42",
     });
+  });
+
+  it("uses the environment http base for browser previews", () => {
+    expect(
+      resolveMarkdownFileLinkBehavior({
+        browserFileLinkPrefix: "",
+        cwd: "/home/julius/project",
+        environmentId: "environment-remote" as never,
+        hasNativeApi: true,
+        href: "src/main.ts:42",
+      }),
+    ).toEqual({
+      browserHref: "https://environment-remote.example.com/file/home/julius/project/src/main.ts:42",
+      interceptsPlainClick: true,
+      remoteEditorHref: null,
+      targetPath: "/home/julius/project/src/main.ts:42",
+    });
+  });
+});
+
+describe("resolveMarkdownFilePlainClickAction", () => {
+  it("prefers remote editor links over the local api", () => {
+    expect(
+      resolveMarkdownFilePlainClickAction({
+        hasNativeApi: true,
+        remoteEditorHref: "vscode://vscode-remote/ssh-remote+wf-gk/repo/project/src/main.ts:42",
+      }),
+    ).toBe("remote-editor");
+  });
+
+  it("falls back to the local editor when no remote editor href is present", () => {
+    expect(
+      resolveMarkdownFilePlainClickAction({
+        hasNativeApi: true,
+        remoteEditorHref: null,
+      }),
+    ).toBe("local-editor");
   });
 });

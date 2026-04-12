@@ -212,6 +212,20 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
 
   it.effect("prepends remote ssh args for VS Code-based editors", () =>
     Effect.gen(function* () {
+      const localCursorLaunch = yield* resolveEditorLaunch(
+        {
+          cwd: "/tmp/workspace/src/open.ts:71:5",
+          editor: "cursor",
+          reuseWindow: true,
+        },
+        "darwin",
+        { PATH: "" },
+      );
+      assert.deepEqual(localCursorLaunch, {
+        command: "cursor",
+        args: ["-r", "--goto", "/tmp/workspace/src/open.ts:71:5"],
+      });
+
       const remoteCursorLaunchWithoutReuse = yield* resolveEditorLaunch(
         {
           cwd: "/tmp/workspace/src/open.ts:71:5",
