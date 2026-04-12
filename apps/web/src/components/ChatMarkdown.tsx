@@ -29,8 +29,11 @@ import { readLocalApi } from "../localApi";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import {
   resolveMarkdownFileLinkBehavior,
+  resolveMarkdownFilePlainClickAction,
   shouldHandleMarkdownFileLinkClick,
+  shouldPreviewMarkdownFileLinkClick,
 } from "./chatMarkdownLinkBehavior";
+import { ChatMarkdownFilePreviewDialog } from "./ChatMarkdownFilePreviewDialog";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -248,6 +251,10 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
   const settings = useSettings();
   const browserFileLinkPrefix = settings.browserFileLinkPrefix;
   const localApi = readLocalApi();
+  const [activeFilePreview, setActiveFilePreview] = useState<{
+    browserHref: string;
+    targetPath: string;
+  } | null>(null);
   const editorRemoteHost = useSavedEnvironmentRegistryStore((state) =>
     environmentId && typeof window !== "undefined" && window.desktopBridge
       ? state.byId[environmentId]?.editorRemoteHost?.trim() || null
@@ -264,6 +271,7 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
         const linkBehavior = resolveMarkdownFileLinkBehavior({
           browserFileLinkPrefix,
           cwd,
+          environmentId,
           hasNativeApi: localApi != null,
           href,
           preferLocalEditorOpen: localApi != null && editorRemoteHost != null,
@@ -278,21 +286,39 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
             {...props}
             href={linkBehavior.browserHref}
             onClick={(event) => {
+              if (
+                targetPath &&
+                linkBehavior.browserHref &&
+                shouldPreviewMarkdownFileLinkClick(event)
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                setActiveFilePreview({
+                  browserHref: linkBehavior.browserHref,
+                  targetPath,
+                });
+                return;
+              }
               if (!shouldHandleMarkdownFileLinkClick(event)) return;
-              if (linkBehavior.remoteEditorHref) {
+              const plainClickAction = resolveMarkdownFilePlainClickAction({
+                hasNativeApi: localApi != null,
+                remoteEditorHref: linkBehavior.remoteEditorHref,
+              });
+              if (plainClickAction === "remote-editor" && linkBehavior.remoteEditorHref) {
                 event.preventDefault();
                 event.stopPropagation();
                 window.location.assign(linkBehavior.remoteEditorHref);
                 return;
               }
-              if (!localApi) return;
-              event.preventDefault();
-              event.stopPropagation();
-              void openInPreferredEditor(
-                localApi,
-                targetPath,
-                editorRemoteHost ? { remoteHost: editorRemoteHost, reuseWindow: true } : undefined,
-              );
+              if (plainClickAction === "local-editor" && localApi) {
+                event.preventDefault();
+                event.stopPropagation();
+                void openInPreferredEditor(localApi, targetPath, {
+                  ...(editorRemoteHost ? { remoteHost: editorRemoteHost } : {}),
+                  reuseWindow: true,
+                });
+                return;
+              }
             }}
           />
         );
@@ -319,19 +345,33 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
         );
       },
     }),
-    [browserFileLinkPrefix, cwd, diffThemeName, editorRemoteHost, isStreaming, localApi],
+    [
+      browserFileLinkPrefix,
+      cwd,
+      diffThemeName,
+      editorRemoteHost,
+      environmentId,
+      isStreaming,
+      localApi,
+    ],
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
+    <>
+      <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={markdownComponents}
+          urlTransform={markdownUrlTransform}
+        >
+          {text}
+        </ReactMarkdown>
+      </div>
+      <ChatMarkdownFilePreviewDialog
+        preview={activeFilePreview}
+        onClose={() => setActiveFilePreview(null)}
+      />
+    </>
   );
 }
 

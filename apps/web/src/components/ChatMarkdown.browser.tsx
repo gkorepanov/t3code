@@ -4,12 +4,18 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-const { openInPreferredEditorMock, readLocalApiMock } = vi.hoisted(() => ({
+const { openInPreferredEditorMock, readLocalApiMock, settingsState } = vi.hoisted(() => ({
   openInPreferredEditorMock: vi.fn(async () => "vscode"),
   readLocalApiMock: vi.fn(() => ({
     server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-    shell: { openInEditor: vi.fn(async () => undefined) },
+    shell: {
+      openExternal: vi.fn(async () => undefined),
+      openInEditor: vi.fn(async () => undefined),
+    },
   })),
+  settingsState: {
+    browserFileLinkPrefix: "",
+  },
 }));
 
 vi.mock("../editorPreferences", () => ({
@@ -23,12 +29,17 @@ vi.mock("../localApi", () => ({
   readLocalApi: readLocalApiMock,
 }));
 
+vi.mock("../hooks/useSettings", () => ({
+  useSettings: () => settingsState,
+}));
+
 import ChatMarkdown from "./ChatMarkdown";
 
 describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     readLocalApiMock.mockClear();
+    settingsState.browserFileLinkPrefix = "";
     localStorage.clear();
     document.body.innerHTML = "";
   });
@@ -43,12 +54,14 @@ describe("ChatMarkdown", () => {
     try {
       const link = page.getByRole("link", { name: "PermissionRule.ts" });
       await expect.element(link).toBeInTheDocument();
-      await expect.element(link).toHaveAttribute("href", filePath);
+      await expect.element(link).toHaveAttribute("href", `/file${filePath}`);
 
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), filePath);
+        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), filePath, {
+          reuseWindow: true,
+        });
       });
     } finally {
       await screen.unmount();
@@ -65,12 +78,14 @@ describe("ChatMarkdown", () => {
     try {
       const link = page.getByRole("link", { name: "PermissionRule.ts:1" });
       await expect.element(link).toBeInTheDocument();
-      await expect.element(link).toHaveAttribute("href", `${filePath}#L1`);
+      await expect.element(link).toHaveAttribute("href", `/file${filePath}:1`);
 
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), `${filePath}:1`);
+        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), `${filePath}:1`, {
+          reuseWindow: true,
+        });
       });
     } finally {
       await screen.unmount();

@@ -86,6 +86,10 @@ export default defineConfig({
               target: devProxyTarget,
               changeOrigin: true,
             },
+            "/file": {
+              target: devProxyTarget,
+              changeOrigin: true,
+            },
           },
         }
       : {}),

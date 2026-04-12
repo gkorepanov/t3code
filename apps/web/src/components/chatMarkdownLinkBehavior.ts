@@ -1,8 +1,12 @@
+import type { EnvironmentId } from "@t3tools/contracts";
+
+import { resolveEnvironmentHttpUrl } from "../environments/runtime";
 import {
   buildMarkdownBrowserFileHref,
   buildMarkdownRemoteEditorHref,
   resolveMarkdownFileLinkTarget,
 } from "../markdown-links";
+import { isTerminalLinkActivation } from "../terminal-links";
 
 export interface MarkdownFileLinkBehavior {
   readonly browserHref: string | undefined;
@@ -10,6 +14,8 @@ export interface MarkdownFileLinkBehavior {
   readonly remoteEditorHref: string | null;
   readonly targetPath: string | null;
 }
+
+export type MarkdownFilePlainClickAction = "browser" | "local-editor" | "remote-editor";
 
 export function shouldHandleMarkdownFileLinkClick(
   event: Pick<
@@ -27,21 +33,67 @@ export function shouldHandleMarkdownFileLinkClick(
   );
 }
 
+export function shouldPreviewMarkdownFileLinkClick(
+  event: Pick<
+    MouseEvent,
+    "altKey" | "button" | "ctrlKey" | "defaultPrevented" | "metaKey" | "shiftKey"
+  >,
+  platform = typeof navigator === "undefined" ? "" : navigator.platform,
+): boolean {
+  return (
+    !event.defaultPrevented &&
+    event.button === 0 &&
+    !event.altKey &&
+    !event.shiftKey &&
+    isTerminalLinkActivation(event, platform)
+  );
+}
+
+export function resolveMarkdownFilePlainClickAction(input: {
+  readonly hasNativeApi: boolean;
+  readonly remoteEditorHref: string | null;
+}): MarkdownFilePlainClickAction {
+  if (input.remoteEditorHref) {
+    return "remote-editor";
+  }
+  if (input.hasNativeApi) {
+    return "local-editor";
+  }
+  return "browser";
+}
+
 export function resolveMarkdownFileLinkBehavior({
   browserFileLinkPrefix,
   cwd,
+  environmentId,
   hasNativeApi,
   href,
   preferLocalEditorOpen = false,
 }: {
   browserFileLinkPrefix: string | undefined;
   cwd: string | undefined;
+  environmentId: EnvironmentId | undefined;
   hasNativeApi: boolean;
   href: string | undefined;
   preferLocalEditorOpen?: boolean;
 }): MarkdownFileLinkBehavior {
   const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
-  const browserHref = buildMarkdownBrowserFileHref(targetPath);
+  const relativeBrowserHref = buildMarkdownBrowserFileHref(targetPath);
+  const browserHref =
+    relativeBrowserHref == null
+      ? href
+      : environmentId == null
+        ? relativeBrowserHref
+        : (() => {
+            try {
+              return resolveEnvironmentHttpUrl({
+                environmentId,
+                pathname: relativeBrowserHref,
+              });
+            } catch {
+              return relativeBrowserHref;
+            }
+          })();
   const remoteEditorHref = preferLocalEditorOpen
     ? null
     : buildMarkdownRemoteEditorHref(targetPath, browserFileLinkPrefix);
