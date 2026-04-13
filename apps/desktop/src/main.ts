@@ -1668,23 +1668,30 @@ function registerIpcHandlers(): void {
       webPreferences: { sandbox: true },
     });
     try {
+      const closed = new Promise<boolean>((resolve) =>
+        authWindow.once("closed", () => resolve(false)),
+      );
       const waitForAuthCookie = async () => {
-        const deadline = Date.now() + 15_000;
-        while (Date.now() < deadline) {
+        while (true) {
+          if (authWindow.isDestroyed()) {
+            return false;
+          }
           const cookies = await authWindow.webContents.session.cookies.get({ url: authUrl });
           if (cookies.some((cookie) => cookie.name === "CF_Authorization")) {
             return true;
           }
-          await new Promise((resolve) => setTimeout(resolve, 250));
+          const continueWaiting = await Promise.race([
+            new Promise<true>((resolve) => setTimeout(() => resolve(true), 250)),
+            closed,
+          ]);
+          if (!continueWaiting) {
+            return false;
+          }
         }
-        return false;
       };
-      const closed = new Promise<boolean>((resolve) =>
-        authWindow.once("closed", () => resolve(false)),
-      );
       await authWindow.loadURL(authUrl);
-      const authenticated = await Promise.race([waitForAuthCookie(), closed]);
-      if (!authWindow.isDestroyed()) {
+      const authenticated = await waitForAuthCookie();
+      if (authenticated && !authWindow.isDestroyed()) {
         authWindow.close();
       }
       return authenticated;
