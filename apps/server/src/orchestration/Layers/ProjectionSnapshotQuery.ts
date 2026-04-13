@@ -298,6 +298,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
+        WHERE thread_id IN (SELECT thread_id FROM projection_threads WHERE archived_at IS NULL)
         ORDER BY thread_id ASC, created_at ASC, message_id ASC
       `,
   });
@@ -317,6 +318,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
+        WHERE thread_id IN (SELECT thread_id FROM projection_threads WHERE archived_at IS NULL)
         ORDER BY thread_id ASC, created_at ASC, plan_id ASC
       `,
   });
@@ -337,6 +339,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence,
           created_at AS "createdAt"
         FROM projection_thread_activities
+        WHERE thread_id IN (SELECT thread_id FROM projection_threads WHERE archived_at IS NULL)
         ORDER BY
           thread_id ASC,
           CASE WHEN sequence IS NULL THEN 0 ELSE 1 END ASC,
@@ -362,6 +365,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           last_error AS "lastError",
           updated_at AS "updatedAt"
         FROM projection_thread_sessions
+        WHERE thread_id IN (SELECT thread_id FROM projection_threads WHERE archived_at IS NULL)
         ORDER BY thread_id ASC
       `,
   });
@@ -382,6 +386,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           completed_at AS "completedAt"
         FROM projection_turns
         WHERE checkpoint_turn_count IS NOT NULL
+          AND thread_id IN (SELECT thread_id FROM projection_threads WHERE archived_at IS NULL)
         ORDER BY thread_id ASC, checkpoint_turn_count ASC
       `,
   });
@@ -403,6 +408,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           source_proposed_plan_id AS "sourceProposedPlanId"
         FROM projection_turns
         WHERE turn_id IS NOT NULL
+          AND thread_id IN (SELECT thread_id FROM projection_threads WHERE archived_at IS NULL)
         ORDER BY thread_id ASC, requested_at DESC, turn_id DESC
       `,
   });

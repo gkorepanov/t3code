@@ -435,6 +435,49 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("keeps archived thread titles in snapshot without hydrating archived history", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+
+      yield* sql`
+        INSERT INTO projection_projects (project_id, title, workspace_root, default_model_selection_json, scripts_json, created_at, updated_at, deleted_at)
+        VALUES ('project-1', 'Project 1', '/tmp/project-1', '{"provider":"codex","model":"gpt-5-codex"}', '[]', '2026-03-02T00:00:00.000Z', '2026-03-02T00:00:00.000Z', NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (thread_id, project_id, title, model_selection_json, created_at, updated_at, archived_at, deleted_at)
+        VALUES
+          ('thread-active', 'project-1', 'Active Thread', '{"provider":"codex","model":"gpt-5-codex"}', '2026-03-02T00:00:01.000Z', '2026-03-02T00:00:01.000Z', NULL, NULL),
+          ('thread-archived', 'project-1', 'Archived Thread', '{"provider":"codex","model":"gpt-5-codex"}', '2026-03-02T00:00:02.000Z', '2026-03-02T00:00:03.000Z', '2026-03-02T00:00:04.000Z', NULL)
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_messages (message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at)
+        VALUES
+          ('message-active', 'thread-active', NULL, 'assistant', 'visible', 0, '2026-03-02T00:00:05.000Z', '2026-03-02T00:00:05.000Z'),
+          ('message-archived', 'thread-archived', NULL, 'assistant', 'hidden', 0, '2026-03-02T00:00:06.000Z', '2026-03-02T00:00:06.000Z')
+      `;
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      assert.equal(
+        snapshot.threads.find((thread) => thread.id === ThreadId.make("thread-active"))?.messages
+          .length,
+        1,
+      );
+      assert.equal(
+        snapshot.threads.find((thread) => thread.id === ThreadId.make("thread-archived"))?.title,
+        "Archived Thread",
+      );
+      assert.deepEqual(
+        snapshot.threads.find((thread) => thread.id === ThreadId.make("thread-archived"))?.messages,
+        [],
+      );
+    }),
+  );
+
   it.effect(
     "reads targeted project, thread, and count queries without hydrating the full snapshot",
     () =>
