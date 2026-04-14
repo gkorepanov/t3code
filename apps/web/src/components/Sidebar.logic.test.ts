@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  canPickSidebarProjectFolder,
   createThreadJumpHintVisibilityController,
+  findExistingSidebarProjectForPath,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -11,6 +13,7 @@ import {
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
+  resolveSidebarProjectDefaultEnvironmentId,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -166,6 +169,99 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
+  });
+});
+
+describe("canPickSidebarProjectFolder", () => {
+  it("allows the local desktop picker for the primary environment", () => {
+    expect(
+      canPickSidebarProjectFolder({
+        isElectron: true,
+        activeEnvironmentId: localEnvironmentId,
+        primaryEnvironmentId: localEnvironmentId,
+      }),
+    ).toBe(true);
+  });
+
+  it("disables the local desktop picker for remote environments", () => {
+    expect(
+      canPickSidebarProjectFolder({
+        isElectron: true,
+        activeEnvironmentId: EnvironmentId.make("environment-remote"),
+        primaryEnvironmentId: localEnvironmentId,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("findExistingSidebarProjectForPath", () => {
+  it("matches only projects from the active environment", () => {
+    const localProject = {
+      environmentId: localEnvironmentId,
+      cwd: "/repo/app",
+      id: ProjectId.make("project-local"),
+    };
+    const remoteProject = {
+      environmentId: EnvironmentId.make("environment-remote"),
+      cwd: "/repo/app",
+      id: ProjectId.make("project-remote"),
+    };
+
+    expect(
+      findExistingSidebarProjectForPath({
+        projects: [localProject, remoteProject],
+        environmentId: remoteProject.environmentId,
+        cwd: "/repo/app",
+      }),
+    ).toEqual(remoteProject);
+  });
+});
+
+describe("resolveSidebarProjectDefaultEnvironmentId", () => {
+  it("prefers the route thread environment over the active environment", () => {
+    expect(
+      resolveSidebarProjectDefaultEnvironmentId({
+        routeEnvironmentId: EnvironmentId.make("environment-remote"),
+        activeEnvironmentId: localEnvironmentId,
+      }),
+    ).toBe(EnvironmentId.make("environment-remote"));
+  });
+
+  it("falls back to the draft environment when the route is a draft", () => {
+    expect(
+      resolveSidebarProjectDefaultEnvironmentId({
+        routeDraftEnvironmentId: EnvironmentId.make("environment-draft"),
+        activeEnvironmentId: localEnvironmentId,
+      }),
+    ).toBe(EnvironmentId.make("environment-draft"));
+  });
+
+  it("falls back to the active environment when there is no route-scoped environment", () => {
+    expect(
+      resolveSidebarProjectDefaultEnvironmentId({
+        activeEnvironmentId: localEnvironmentId,
+      }),
+    ).toBe(localEnvironmentId);
+  });
+
+  it("falls back to the primary environment when no active environment exists yet", () => {
+    expect(
+      resolveSidebarProjectDefaultEnvironmentId({
+        activeEnvironmentId: null,
+        primaryEnvironmentId: localEnvironmentId,
+      }),
+    ).toBe(localEnvironmentId);
+  });
+});
+
+describe("resolveSidebarProjectDefaultEnvironmentId", () => {
+  it("returns null when no environment is available", () => {
+    expect(
+      resolveSidebarProjectDefaultEnvironmentId({
+        activeEnvironmentId: null,
+        primaryEnvironmentId: null,
+      }),
+    ).toBeNull();
   });
 });
 

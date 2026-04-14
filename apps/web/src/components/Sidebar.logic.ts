@@ -1,6 +1,7 @@
 import * as React from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import type { SidebarThreadSummary, Thread } from "../types";
+import type { Project, SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
 
@@ -160,6 +161,46 @@ export function resolveSidebarNewThreadEnvMode(input: {
   defaultEnvMode: SidebarNewThreadEnvMode;
 }): SidebarNewThreadEnvMode {
   return input.requestedEnvMode ?? input.defaultEnvMode;
+}
+
+export function canPickSidebarProjectFolder(input: {
+  isElectron: boolean;
+  activeEnvironmentId: EnvironmentId | null;
+  primaryEnvironmentId: EnvironmentId | null;
+}): boolean {
+  return (
+    input.isElectron &&
+    input.activeEnvironmentId !== null &&
+    input.primaryEnvironmentId !== null &&
+    input.activeEnvironmentId === input.primaryEnvironmentId
+  );
+}
+
+export function resolveSidebarProjectDefaultEnvironmentId(input: {
+  routeEnvironmentId?: EnvironmentId | null;
+  routeDraftEnvironmentId?: EnvironmentId | null;
+  activeEnvironmentId: EnvironmentId | null;
+  primaryEnvironmentId?: EnvironmentId | null;
+}): EnvironmentId | null {
+  return (
+    input.routeEnvironmentId ??
+    input.routeDraftEnvironmentId ??
+    input.activeEnvironmentId ??
+    input.primaryEnvironmentId ??
+    null
+  );
+}
+
+export function findExistingSidebarProjectForPath<
+  TProject extends Pick<Project, "cwd" | "environmentId">,
+>(input: {
+  projects: readonly TProject[];
+  environmentId: EnvironmentId;
+  cwd: string;
+}): TProject | undefined {
+  return input.projects.find(
+    (project) => project.environmentId === input.environmentId && project.cwd === input.cwd,
+  );
 }
 
 export function resolveSidebarNewThreadSeedContext(input: {

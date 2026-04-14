@@ -5,6 +5,7 @@ import {
   CloudIcon,
   FolderIcon,
   GitPullRequestIcon,
+  MonitorIcon,
   PlusIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -64,7 +65,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import {
   selectProjectByRef,
   selectProjectsAcrossEnvironments,
@@ -90,11 +91,7 @@ import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
-import {
-  buildThreadRouteParams,
-  resolveThreadRouteRef,
-  resolveThreadRouteTarget,
-} from "../threadRoutes";
+import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
@@ -129,9 +126,12 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  canPickSidebarProjectFolder,
+  findExistingSidebarProjectForPath,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
+  resolveSidebarProjectDefaultEnvironmentId,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -157,9 +157,21 @@ import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { deriveLogicalProjectKey } from "../logicalProject";
 import {
+  ensureEnvironmentConnectionBootstrapped,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
+import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
+import {
+  Select,
+  SelectGroup,
+  SelectGroupLabel,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import type { Project, SidebarThreadSummary, Thread } from "../types";
 const THREAD_PREVIEW_LIMIT = 6;
 const EMPTY_SEARCH_THREADS = Object.freeze([]) as readonly Thread[];
@@ -2084,7 +2096,15 @@ interface SidebarProjectsContentProps {
   updateSettings: ReturnType<typeof useUpdateSettings>["updateSettings"];
   shouldShowProjectPathEntry: boolean;
   handleStartAddProject: () => void;
-  isElectron: boolean;
+  canBrowseForProjectFolder: boolean;
+  showProjectEnvironmentSelector: boolean;
+  projectEnvironmentOptions: readonly {
+    environmentId: EnvironmentId;
+    label: string;
+    isPrimary: boolean;
+  }[];
+  projectTargetEnvironmentId: EnvironmentId | null;
+  setProjectTargetEnvironmentId: React.Dispatch<React.SetStateAction<EnvironmentId | null>>;
   isPickingFolder: boolean;
   isAddingProject: boolean;
   handlePickFolder: () => Promise<void>;
@@ -2138,7 +2158,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     updateSettings,
     shouldShowProjectPathEntry,
     handleStartAddProject,
-    isElectron,
+    canBrowseForProjectFolder,
+    showProjectEnvironmentSelector,
+    projectEnvironmentOptions,
+    projectTargetEnvironmentId,
+    setProjectTargetEnvironmentId,
     isPickingFolder,
     isAddingProject,
     handlePickFolder,
@@ -2210,6 +2234,15 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   const handleBrowseForFolderClick = useCallback(() => {
     void handlePickFolder();
   }, [handlePickFolder]);
+  const selectedProjectEnvironment = useMemo(
+    () =>
+      projectTargetEnvironmentId
+        ? (projectEnvironmentOptions.find(
+            (option) => option.environmentId === projectTargetEnvironmentId,
+          ) ?? null)
+        : null,
+    [projectEnvironmentOptions, projectTargetEnvironmentId],
+  );
   const hasActiveThreadSearch = threadSearchQuery.trim().length > 0;
   return (
     <SidebarContent className="gap-0">
@@ -2278,7 +2311,56 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         </div>
         {shouldShowProjectPathEntry && (
           <div className="mb-2 px-1">
-            {isElectron && (
+            {showProjectEnvironmentSelector && projectTargetEnvironmentId ? (
+              <div className="mb-1.5">
+                <Select
+                  value={projectTargetEnvironmentId}
+                  onValueChange={(value) => {
+                    setProjectTargetEnvironmentId(value as EnvironmentId);
+                    setAddProjectError(null);
+                  }}
+                  items={projectEnvironmentOptions.map((option) => ({
+                    value: option.environmentId,
+                    label: option.label,
+                  }))}
+                >
+                  <SelectTrigger size="sm" aria-label="Project environment">
+                    {selectedProjectEnvironment?.isPrimary ? (
+                      <MonitorIcon className="size-3.5 opacity-70" />
+                    ) : (
+                      <CloudIcon className="size-3.5 opacity-70" />
+                    )}
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectGroup>
+                      <SelectGroupLabel>Add project to</SelectGroupLabel>
+                      {projectEnvironmentOptions.map((option) => (
+                        <SelectItem key={option.environmentId} value={option.environmentId}>
+                          <span className="inline-flex items-center gap-1.5">
+                            {option.isPrimary ? (
+                              <MonitorIcon className="size-3" />
+                            ) : (
+                              <CloudIcon className="size-3" />
+                            )}
+                            {option.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectPopup>
+                </Select>
+              </div>
+            ) : null}
+            {selectedProjectEnvironment ? (
+              <p className="mb-1 px-0.5 text-[11px] leading-tight text-muted-foreground/70">
+                Path on{" "}
+                <span className="font-medium text-foreground/80">
+                  {selectedProjectEnvironment.label}
+                </span>
+              </p>
+            ) : null}
+            {canBrowseForProjectFolder && (
               <button
                 type="button"
                 className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-secondary py-1.5 text-xs text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
@@ -2429,10 +2511,12 @@ export default function Sidebar() {
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread: baseHandleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
-  const routeThreadRef = useParams({
+  const routeTarget = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteRef(params),
+    select: (params) => resolveThreadRouteTarget(params),
   });
+  const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
+  const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const keybindings = useServerKeybindings();
   const [addingProject, setAddingProject] = useState(false);
@@ -2442,6 +2526,8 @@ export default function Sidebar() {
   const [isPickingFolder, setIsPickingFolder] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [addProjectError, setAddProjectError] = useState<string | null>(null);
+  const [selectedProjectEnvironmentId, setSelectedProjectEnvironmentId] =
+    useState<EnvironmentId | null>(null);
   const addProjectInputRef = useRef<HTMLInputElement | null>(null);
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
@@ -2455,13 +2541,99 @@ export default function Sidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const { isMobile, setOpenMobile } = useSidebar();
-  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const platform = navigator.platform;
-  const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
-  const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
+  const shouldShowProjectPathEntry = addingProject;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryEnvironmentDescriptor = readPrimaryEnvironmentDescriptor();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
+  const routeDraftEnvironmentId = useComposerDraftStore(
+    useCallback(
+      (store) =>
+        routeDraftId ? (store.getDraftSession(routeDraftId)?.environmentId ?? null) : null,
+      [routeDraftId],
+    ),
+  );
+  const defaultProjectEnvironmentId = resolveSidebarProjectDefaultEnvironmentId({
+    routeEnvironmentId: routeThreadRef?.environmentId ?? null,
+    routeDraftEnvironmentId,
+    activeEnvironmentId,
+    primaryEnvironmentId,
+  });
+  const projectEnvironmentOptions = useMemo(() => {
+    const options: Array<{
+      environmentId: EnvironmentId;
+      label: string;
+      isPrimary: boolean;
+    }> = [];
+    const seen = new Set<EnvironmentId>();
+
+    if (primaryEnvironmentId) {
+      options.push({
+        environmentId: primaryEnvironmentId,
+        label: resolveEnvironmentOptionLabel({
+          isPrimary: true,
+          environmentId: primaryEnvironmentId,
+          runtimeLabel: primaryEnvironmentDescriptor?.label ?? null,
+          savedLabel: null,
+        }),
+        isPrimary: true,
+      });
+      seen.add(primaryEnvironmentId);
+    }
+
+    for (const record of Object.values(savedEnvironmentRegistry)) {
+      if (seen.has(record.environmentId)) continue;
+      const runtimeState = savedEnvironmentRuntimeById[record.environmentId];
+      options.push({
+        environmentId: record.environmentId,
+        label: resolveEnvironmentOptionLabel({
+          isPrimary: false,
+          environmentId: record.environmentId,
+          runtimeLabel: runtimeState?.descriptor?.label ?? null,
+          savedLabel: record.label,
+        }),
+        isPrimary: false,
+      });
+      seen.add(record.environmentId);
+    }
+
+    options.sort((a, b) => {
+      if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+    return options;
+  }, [
+    primaryEnvironmentDescriptor?.label,
+    primaryEnvironmentId,
+    savedEnvironmentRegistry,
+    savedEnvironmentRuntimeById,
+  ]);
+  const projectTargetEnvironmentId = selectedProjectEnvironmentId ?? defaultProjectEnvironmentId;
+  useEffect(() => {
+    if (!addingProject) {
+      return;
+    }
+    if (
+      projectTargetEnvironmentId &&
+      projectEnvironmentOptions.some(
+        (option) => option.environmentId === projectTargetEnvironmentId,
+      )
+    ) {
+      return;
+    }
+    setSelectedProjectEnvironmentId(defaultProjectEnvironmentId);
+  }, [
+    addingProject,
+    defaultProjectEnvironmentId,
+    projectEnvironmentOptions,
+    projectTargetEnvironmentId,
+  ]);
+  const canBrowseForProjectFolder = canPickSidebarProjectFolder({
+    isElectron,
+    activeEnvironmentId: projectTargetEnvironmentId,
+    primaryEnvironmentId,
+  });
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -2694,8 +2866,10 @@ export default function Sidebar() {
     async (rawCwd: string) => {
       const cwd = rawCwd.trim();
       if (!cwd || isAddingProject) return;
-      const api = activeEnvironmentId ? readEnvironmentApi(activeEnvironmentId) : undefined;
-      if (!api) return;
+      if (!projectTargetEnvironmentId) {
+        setAddProjectError("No environment selected.");
+        return;
+      }
 
       setIsAddingProject(true);
       const finishAddingProject = () => {
@@ -2705,7 +2879,14 @@ export default function Sidebar() {
         setAddingProject(false);
       };
 
-      const existing = projects.find((project) => project.cwd === cwd);
+      const existing =
+        projectTargetEnvironmentId === null
+          ? undefined
+          : findExistingSidebarProjectForPath({
+              projects,
+              environmentId: projectTargetEnvironmentId,
+              cwd,
+            });
       if (existing) {
         focusMostRecentThreadForProject({
           environmentId: existing.environmentId,
@@ -2719,6 +2900,11 @@ export default function Sidebar() {
       const createdAt = new Date().toISOString();
       const title = cwd.split(/[/\\]/).findLast(isNonEmptyString) ?? cwd;
       try {
+        await ensureEnvironmentConnectionBootstrapped(projectTargetEnvironmentId);
+        const api = readEnvironmentApi(projectTargetEnvironmentId);
+        if (!api) {
+          throw new Error("Selected environment is not connected.");
+        }
         await api.orchestration.dispatchCommand({
           type: "project.create",
           commandId: newCommandId(),
@@ -2731,8 +2917,8 @@ export default function Sidebar() {
           },
           createdAt,
         });
-        if (activeEnvironmentId !== null) {
-          await handleNewThread(scopeProjectRef(activeEnvironmentId, projectId), {
+        if (projectTargetEnvironmentId !== null) {
+          await handleNewThread(scopeProjectRef(projectTargetEnvironmentId, projectId), {
             envMode: defaultThreadEnvMode,
           }).catch(() => undefined);
         }
@@ -2740,26 +2926,17 @@ export default function Sidebar() {
         const description =
           error instanceof Error ? error.message : "An error occurred while adding the project.";
         setIsAddingProject(false);
-        if (shouldBrowseForProjectImmediately) {
-          toastManager.add({
-            type: "error",
-            title: "Failed to add project",
-            description,
-          });
-        } else {
-          setAddProjectError(description);
-        }
+        setAddProjectError(description);
         return;
       }
       finishAddingProject();
     },
     [
       focusMostRecentThreadForProject,
-      activeEnvironmentId,
       handleNewThread,
       isAddingProject,
+      projectTargetEnvironmentId,
       projects,
-      shouldBrowseForProjectImmediately,
       defaultThreadEnvMode,
     ],
   );
@@ -2782,7 +2959,7 @@ export default function Sidebar() {
     }
     if (pickedPath) {
       await addProjectFromPath(pickedPath);
-    } else if (!shouldBrowseForProjectImmediately) {
+    } else {
       addProjectInputRef.current?.focus();
     }
     setIsPickingFolder(false);
@@ -2790,9 +2967,8 @@ export default function Sidebar() {
 
   const handleStartAddProject = () => {
     setAddProjectError(null);
-    if (shouldBrowseForProjectImmediately) {
-      void handlePickFolder();
-      return;
+    if (!addingProject) {
+      setSelectedProjectEnvironmentId(defaultProjectEnvironmentId);
     }
     setAddingProject((prev) => !prev);
   };
@@ -3297,7 +3473,11 @@ export default function Sidebar() {
             updateSettings={updateSettings}
             shouldShowProjectPathEntry={shouldShowProjectPathEntry}
             handleStartAddProject={handleStartAddProject}
-            isElectron={isElectron}
+            canBrowseForProjectFolder={canBrowseForProjectFolder}
+            showProjectEnvironmentSelector={projectEnvironmentOptions.length > 1}
+            projectEnvironmentOptions={projectEnvironmentOptions}
+            projectTargetEnvironmentId={projectTargetEnvironmentId}
+            setProjectTargetEnvironmentId={setSelectedProjectEnvironmentId}
             isPickingFolder={isPickingFolder}
             isAddingProject={isAddingProject}
             handlePickFolder={handlePickFolder}
