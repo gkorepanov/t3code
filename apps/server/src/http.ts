@@ -42,6 +42,12 @@ export const browserApiCorsLayer = HttpRouter.middleware(
   }),
 ).layer;
 
+export const browserApiPreflightRouteLayer = HttpRouter.add(
+  "OPTIONS",
+  "*",
+  HttpServerResponse.empty({ status: 204 }),
+);
+
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
     .trim()
