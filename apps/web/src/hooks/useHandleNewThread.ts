@@ -40,6 +40,7 @@ function useNewThreadState() {
     ): Promise<void> => {
       const {
         getDraftSessionByLogicalProjectKey,
+        getDraftSessionByProjectRef,
         getDraftSession,
         getDraftThread,
         applyStickyState,
@@ -58,7 +59,9 @@ function useNewThreadState() {
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
-      const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      const storedDraftThread =
+        getDraftSessionByLogicalProjectKey(logicalProjectKey) ??
+        getDraftSessionByProjectRef(projectRef);
       const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
         ? currentRouteTarget.kind === "server"
           ? getDraftThread(currentRouteTarget.threadRef)

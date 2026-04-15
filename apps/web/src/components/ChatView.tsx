@@ -648,6 +648,9 @@ export default function ChatView(props: ChatViewProps) {
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
   );
+  const getDraftSessionByProjectRef = useComposerDraftStore(
+    (store) => store.getDraftSessionByProjectRef,
+  );
   const getDraftSession = useComposerDraftStore((store) => store.getDraftSession);
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
@@ -932,7 +935,9 @@ export default function ChatView(props: ChatViewProps) {
         activeProject,
         projectGroupingSettings,
       );
-      const storedDraftSession = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      const storedDraftSession =
+        getDraftSessionByLogicalProjectKey(logicalProjectKey) ??
+        getDraftSessionByProjectRef(activeProjectRef);
       if (storedDraftSession) {
         setDraftThreadContext(storedDraftSession.draftId, input);
         setLogicalProjectDraftThreadId(
@@ -990,6 +995,7 @@ export default function ChatView(props: ChatViewProps) {
       draftId,
       getDraftSession,
       getDraftSessionByLogicalProjectKey,
+      getDraftSessionByProjectRef,
       isServerThread,
       navigate,
       projectGroupingSettings,
