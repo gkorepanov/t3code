@@ -4,16 +4,21 @@ import type { Project } from "./types";
 
 export function deriveLogicalProjectKey(
   project: Pick<Project, "environmentId" | "id" | "repositoryIdentity">,
+  separateRepositoryPaths = false,
 ): string {
-  return (
-    project.repositoryIdentity?.canonicalKey ??
-    scopedProjectKey(scopeProjectRef(project.environmentId, project.id))
-  );
+  const physicalKey = scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
+  return separateRepositoryPaths
+    ? physicalKey
+    : (project.repositoryIdentity?.canonicalKey ?? physicalKey);
 }
 
 export function deriveLogicalProjectKeyFromRef(
   projectRef: ScopedProjectRef,
   project: Pick<Project, "repositoryIdentity"> | null | undefined,
+  separateRepositoryPaths = false,
 ): string {
-  return project?.repositoryIdentity?.canonicalKey ?? scopedProjectKey(projectRef);
+  const physicalKey = scopedProjectKey(projectRef);
+  return separateRepositoryPaths
+    ? physicalKey
+    : (project?.repositoryIdentity?.canonicalKey ?? physicalKey);
 }

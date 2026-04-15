@@ -2508,6 +2508,7 @@ export default function Sidebar() {
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
   const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
   const defaultThreadEnvMode = useSettings((s) => s.defaultThreadEnvMode);
+  const separateRepositoryPaths = useSettings((s) => s.separateRepositoryPaths);
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread: baseHandleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
@@ -2649,17 +2650,17 @@ export default function Sidebar() {
     const mapping = new Map<string, string>();
     for (const project of orderedProjects) {
       const physicalKey = scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
-      mapping.set(physicalKey, deriveLogicalProjectKey(project));
+      mapping.set(physicalKey, deriveLogicalProjectKey(project, separateRepositoryPaths));
     }
     return mapping;
-  }, [orderedProjects]);
+  }, [orderedProjects, separateRepositoryPaths]);
 
   const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(() => {
     // Group projects by logical key while preserving insertion order from
     // orderedProjects.
     const groupedMembers = new Map<string, Project[]>();
     for (const project of orderedProjects) {
-      const logicalKey = deriveLogicalProjectKey(project);
+      const logicalKey = deriveLogicalProjectKey(project, separateRepositoryPaths);
       const existing = groupedMembers.get(logicalKey);
       if (existing) {
         existing.push(project);
@@ -2671,7 +2672,7 @@ export default function Sidebar() {
     const result: SidebarProjectSnapshot[] = [];
     const seen = new Set<string>();
     for (const project of orderedProjects) {
-      const logicalKey = deriveLogicalProjectKey(project);
+      const logicalKey = deriveLogicalProjectKey(project, separateRepositoryPaths);
       if (seen.has(logicalKey)) continue;
       seen.add(logicalKey);
 
@@ -2720,6 +2721,7 @@ export default function Sidebar() {
   }, [
     orderedProjects,
     primaryEnvironmentId,
+    separateRepositoryPaths,
     savedEnvironmentRegistry,
     savedEnvironmentRuntimeById,
   ]);

@@ -28,6 +28,7 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("")),
   ),
   requireMetaEnterToSend: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  separateRepositoryPaths: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),

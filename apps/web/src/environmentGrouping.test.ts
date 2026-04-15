@@ -1,5 +1,5 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { scopeProjectRef } from "@t3tools/client-runtime";
+import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -230,6 +230,25 @@ describe("environment grouping", () => {
         },
       });
       expect(deriveLogicalProjectKey(project)).toBe(SHARED_REPO_CANONICAL_KEY);
+    });
+
+    it("uses the physical project key when separateRepositoryPaths is enabled", () => {
+      const project = makeProject({
+        id: sharedProjectPrimaryId,
+        environmentId: primaryEnvId,
+        name: "shared-repo",
+        repositoryIdentity: {
+          canonicalKey: SHARED_REPO_CANONICAL_KEY,
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: "https://github.com/example/shared-repo.git",
+          },
+        },
+      });
+      expect(deriveLogicalProjectKey(project, true)).toBe(
+        scopedProjectKey(scopeProjectRef(primaryEnvId, sharedProjectPrimaryId)),
+      );
     });
 
     it("falls back to scoped project key when no repositoryIdentity", () => {

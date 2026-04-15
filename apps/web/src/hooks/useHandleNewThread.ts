@@ -8,6 +8,7 @@ import {
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
+import { useSettings } from "../hooks/useSettings";
 import { newDraftId, newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import { deriveLogicalProjectKey } from "../logicalProject";
@@ -18,6 +19,7 @@ import { useUiStateStore } from "../uiStateStore";
 
 function useNewThreadState() {
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
+  const separateRepositoryPaths = useSettings((settings) => settings.separateRepositoryPaths);
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
@@ -35,6 +37,7 @@ function useNewThreadState() {
     ): Promise<void> => {
       const {
         getDraftSessionByLogicalProjectKey,
+        getDraftSessionByProjectRef,
         getDraftSession,
         getDraftThread,
         applyStickyState,
@@ -48,12 +51,14 @@ function useNewThreadState() {
           candidate.environmentId === projectRef.environmentId,
       );
       const logicalProjectKey = project
-        ? deriveLogicalProjectKey(project)
+        ? deriveLogicalProjectKey(project, separateRepositoryPaths)
         : scopedProjectKey(projectRef);
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
-      const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      const storedDraftThread =
+        getDraftSessionByLogicalProjectKey(logicalProjectKey) ??
+        getDraftSessionByProjectRef(projectRef);
       const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
         ? currentRouteTarget.kind === "server"
           ? getDraftThread(currentRouteTarget.threadRef)
@@ -128,7 +133,7 @@ function useNewThreadState() {
         });
       })();
     },
-    [getCurrentRouteTarget, router, projects],
+    [getCurrentRouteTarget, projects, router, separateRepositoryPaths],
   );
 }
 

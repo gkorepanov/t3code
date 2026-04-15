@@ -479,6 +479,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.requireMetaEnterToSend !== DEFAULT_UNIFIED_SETTINGS.requireMetaEnterToSend
         ? ["Cmd/Ctrl+Enter to send"]
         : []),
+      ...(settings.separateRepositoryPaths !== DEFAULT_UNIFIED_SETTINGS.separateRepositoryPaths
+        ? ["Project path grouping"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -510,6 +513,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.requireMetaEnterToSend,
+      settings.separateRepositoryPaths,
       settings.timestampFormat,
       theme,
     ],
@@ -967,6 +971,33 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Project path grouping"
+          description="Treat each added path as its own project instead of merging paths that share a Git remote."
+          resetAction={
+            settings.separateRepositoryPaths !==
+            DEFAULT_UNIFIED_SETTINGS.separateRepositoryPaths ? (
+              <SettingResetButton
+                label="project path grouping"
+                onClick={() =>
+                  updateSettings({
+                    separateRepositoryPaths: DEFAULT_UNIFIED_SETTINGS.separateRepositoryPaths,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.separateRepositoryPaths}
+              onCheckedChange={(checked) =>
+                updateSettings({ separateRepositoryPaths: Boolean(checked) })
+              }
+              aria-label="Separate same-repository paths into distinct projects"
+            />
           }
         />
 

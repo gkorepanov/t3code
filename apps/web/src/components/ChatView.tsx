@@ -636,6 +636,9 @@ export default function ChatView(props: ChatViewProps) {
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
   );
+  const getDraftSessionByProjectRef = useComposerDraftStore(
+    (store) => store.getDraftSessionByProjectRef,
+  );
   const getDraftSession = useComposerDraftStore((store) => store.getDraftSession);
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
@@ -848,8 +851,10 @@ export default function ChatView(props: ChatViewProps) {
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
-    const logicalKey = deriveLogicalProjectKey(activeProject);
-    const memberProjects = allProjects.filter((p) => deriveLogicalProjectKey(p) === logicalKey);
+    const logicalKey = deriveLogicalProjectKey(activeProject, settings.separateRepositoryPaths);
+    const memberProjects = allProjects.filter(
+      (p) => deriveLogicalProjectKey(p, settings.separateRepositoryPaths) === logicalKey,
+    );
     const seen = new Set<string>();
     const envs: Array<{
       environmentId: EnvironmentId;
@@ -888,6 +893,7 @@ export default function ChatView(props: ChatViewProps) {
     primaryEnvironmentId,
     savedEnvironmentRegistry,
     savedEnvironmentRuntimeById,
+    settings.separateRepositoryPaths,
   ]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
 
@@ -914,8 +920,13 @@ export default function ChatView(props: ChatViewProps) {
         throw new Error("No active project is available for this pull request.");
       }
       const activeProjectRef = scopeProjectRef(activeProject.environmentId, activeProject.id);
-      const logicalProjectKey = deriveLogicalProjectKey(activeProject);
-      const storedDraftSession = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      const logicalProjectKey = deriveLogicalProjectKey(
+        activeProject,
+        settings.separateRepositoryPaths,
+      );
+      const storedDraftSession =
+        getDraftSessionByLogicalProjectKey(logicalProjectKey) ??
+        getDraftSessionByProjectRef(activeProjectRef);
       if (storedDraftSession) {
         setDraftThreadContext(storedDraftSession.draftId, input);
         setLogicalProjectDraftThreadId(
@@ -973,11 +984,13 @@ export default function ChatView(props: ChatViewProps) {
       draftId,
       getDraftSession,
       getDraftSessionByLogicalProjectKey,
+      getDraftSessionByProjectRef,
       isServerThread,
       navigate,
       routeKind,
       setDraftThreadContext,
       setLogicalProjectDraftThreadId,
+      settings.separateRepositoryPaths,
     ],
   );
 
