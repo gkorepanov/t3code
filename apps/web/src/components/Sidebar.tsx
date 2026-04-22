@@ -2740,6 +2740,10 @@ export default function Sidebar() {
     ReadonlySet<string>
   >(() => new Set());
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
+  const [showThreadJumpSidebarOverlay, setShowThreadJumpSidebarOverlay] = useState(false);
+  const [lockThreadJumpSidebarOverlayTransition, setLockThreadJumpSidebarOverlayTransition] =
+    useState(false);
+  const threadJumpSidebarOverlayTransitionFrameRef = useRef<number | null>(null);
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
@@ -2747,10 +2751,38 @@ export default function Sidebar() {
   const selectedThreadCount = useThreadSelectionStore((s) => s.selectedThreadKeys.size);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, open, setOpenMobile } = useSidebar();
   const platform = navigator.platform;
   const shortcutModifiers = useShortcutModifierState();
   const modelPickerOpen = useModelPickerOpen();
+
+  const updateThreadJumpSidebarOverlayVisibility = useCallback((shouldShow: boolean) => {
+    if (threadJumpSidebarOverlayTransitionFrameRef.current !== null) {
+      window.cancelAnimationFrame(threadJumpSidebarOverlayTransitionFrameRef.current);
+      threadJumpSidebarOverlayTransitionFrameRef.current = null;
+    }
+
+    if (shouldShow) {
+      setLockThreadJumpSidebarOverlayTransition(true);
+      setShowThreadJumpSidebarOverlay(true);
+      return;
+    }
+
+    setShowThreadJumpSidebarOverlay(false);
+    setLockThreadJumpSidebarOverlayTransition(true);
+    threadJumpSidebarOverlayTransitionFrameRef.current = window.requestAnimationFrame(() => {
+      threadJumpSidebarOverlayTransitionFrameRef.current = null;
+      setLockThreadJumpSidebarOverlayTransition(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (threadJumpSidebarOverlayTransitionFrameRef.current !== null) {
+        window.cancelAnimationFrame(threadJumpSidebarOverlayTransitionFrameRef.current);
+      }
+    };
+  }, []);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
@@ -3111,9 +3143,10 @@ export default function Sidebar() {
       context: sidebarShortcutContext,
     },
   );
-  const visibleThreadJumpLabelByKey = showThreadJumpHints
-    ? threadJumpLabelByKey
-    : EMPTY_THREAD_JUMP_LABELS;
+  const visibleThreadJumpLabelByKey =
+    showThreadJumpHints || showThreadJumpSidebarOverlay
+      ? threadJumpLabelByKey
+      : EMPTY_THREAD_JUMP_LABELS;
   const orderedSidebarThreadKeys = visibleSidebarThreadKeys;
   const prewarmedSidebarThreadKeys = useMemo(
     () => getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys),
@@ -3142,7 +3175,13 @@ export default function Sidebar() {
 
   useEffect(() => {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
-  }, [shouldShowThreadJumpHintsNow, updateThreadJumpHintsVisibility]);
+    updateThreadJumpSidebarOverlayVisibility(shouldShowThreadJumpHintsNow && !open);
+  }, [
+    open,
+    shouldShowThreadJumpHintsNow,
+    updateThreadJumpHintsVisibility,
+    updateThreadJumpSidebarOverlayVisibility,
+  ]);
 
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -3364,6 +3403,14 @@ export default function Sidebar() {
 
   return (
     <>
+      <span
+        aria-hidden="true"
+        data-thread-jump-sidebar-overlay={showThreadJumpSidebarOverlay ? "true" : undefined}
+        data-thread-jump-sidebar-overlay-transition-lock={
+          lockThreadJumpSidebarOverlayTransition ? "true" : undefined
+        }
+        hidden
+      />
       <SidebarChromeHeader isElectron={isElectron} />
 
       {isOnSettings ? (
