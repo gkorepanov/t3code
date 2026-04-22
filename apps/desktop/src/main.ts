@@ -1762,7 +1762,7 @@ function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1100,
     height: 780,
-    minWidth: 840,
+    minWidth: 430,
     minHeight: 620,
     show: isDevelopment,
     autoHideMenuBar: true,

@@ -180,6 +180,42 @@ code {
   -webkit-app-region: no-drag;
 }
 
+[data-slot="sidebar"][data-side="left"][data-state="collapsed"][data-collapsible="offcanvas"]:has(
+    [data-thread-jump-sidebar-overlay="true"]
+  )
+  > [data-slot="sidebar-container"] {
+  left: 0 !important;
+}
+
+[data-slot="sidebar"][data-side="left"][data-state="collapsed"][data-collapsible="offcanvas"]:has(
+    [data-thread-jump-sidebar-overlay="true"]
+  )
+  > [data-slot="sidebar-container"],
+[data-slot="sidebar"][data-side="left"][data-state="collapsed"][data-collapsible="offcanvas"]:has(
+    [data-thread-jump-sidebar-overlay-transition-lock="true"]
+  )
+  > [data-slot="sidebar-container"] {
+  transition-duration: 0ms !important;
+}
+
+[data-slot="sidebar"][data-side="left"][data-state="collapsed"][data-collapsible="offcanvas"]:has(
+    [data-thread-jump-sidebar-overlay="true"]
+  )
+  > [data-slot="sidebar-gap"] {
+  width: 0 !important;
+}
+
+[data-slot="sidebar"][data-side="left"][data-state="collapsed"][data-collapsible="offcanvas"]:has(
+    [data-thread-jump-sidebar-overlay="true"]
+  )
+  > [data-slot="sidebar-gap"],
+[data-slot="sidebar"][data-side="left"][data-state="collapsed"][data-collapsible="offcanvas"]:has(
+    [data-thread-jump-sidebar-overlay-transition-lock="true"]
+  )
+  > [data-slot="sidebar-gap"] {
+  transition-duration: 0ms !important;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
