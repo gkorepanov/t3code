@@ -233,6 +233,7 @@ function Sidebar({
             data-mobile="true"
             data-sidebar="sidebar"
             data-slot="sidebar"
+            keepMounted
             showCloseButton={false}
             side={side}
             style={
