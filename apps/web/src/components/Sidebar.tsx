@@ -190,6 +190,10 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 
+function isThreadJumpSidebarOverlayVisible(): boolean {
+  return document.querySelector("[data-thread-jump-sidebar-overlay='true']") !== null;
+}
+
 function threadJumpLabelMapsEqual(
   left: ReadonlyMap<string, string>,
   right: ReadonlyMap<string, string>,
@@ -1463,14 +1467,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const isShiftClick = event.shiftKey;
       const threadKey = scopedThreadKey(threadRef);
       const currentSelectionCount = useThreadSelectionStore.getState().selectedThreadKeys.size;
+      const shouldUseNavigationClick = isThreadJumpSidebarOverlayVisible();
 
-      if (isModClick) {
+      if (isModClick && !shouldUseNavigationClick) {
         event.preventDefault();
         toggleThreadSelection(threadKey);
         return;
       }
 
-      if (isShiftClick) {
+      if (isShiftClick && !shouldUseNavigationClick) {
         event.preventDefault();
         rangeSelectTo(threadKey, orderedProjectThreadKeys);
         return;
@@ -2538,6 +2543,7 @@ export default function Sidebar() {
   const [lockThreadJumpSidebarOverlayTransition, setLockThreadJumpSidebarOverlayTransition] =
     useState(false);
   const threadJumpSidebarOverlayTransitionFrameRef = useRef<number | null>(null);
+  const threadJumpOpenedMobileSidebarRef = useRef(false);
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
@@ -2545,29 +2551,40 @@ export default function Sidebar() {
   const selectedThreadCount = useThreadSelectionStore((s) => s.selectedThreadKeys.size);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
-  const { isMobile, open, setOpenMobile } = useSidebar();
+  const { isMobile, open, openMobile, setOpenMobile } = useSidebar();
   const platform = navigator.platform;
   const shouldShowProjectPathEntry = addingProject;
 
-  const updateThreadJumpSidebarOverlayVisibility = useCallback((shouldShow: boolean) => {
-    if (threadJumpSidebarOverlayTransitionFrameRef.current !== null) {
-      window.cancelAnimationFrame(threadJumpSidebarOverlayTransitionFrameRef.current);
-      threadJumpSidebarOverlayTransitionFrameRef.current = null;
-    }
+  const updateThreadJumpSidebarOverlayVisibility = useCallback(
+    (shouldShow: boolean) => {
+      if (threadJumpSidebarOverlayTransitionFrameRef.current !== null) {
+        window.cancelAnimationFrame(threadJumpSidebarOverlayTransitionFrameRef.current);
+        threadJumpSidebarOverlayTransitionFrameRef.current = null;
+      }
 
-    if (shouldShow) {
+      if (shouldShow) {
+        setLockThreadJumpSidebarOverlayTransition(true);
+        setShowThreadJumpSidebarOverlay(true);
+        if (isMobile && !openMobile) {
+          threadJumpOpenedMobileSidebarRef.current = true;
+          setOpenMobile(true);
+        }
+        return;
+      }
+
+      setShowThreadJumpSidebarOverlay(false);
+      if (threadJumpOpenedMobileSidebarRef.current) {
+        threadJumpOpenedMobileSidebarRef.current = false;
+        setOpenMobile(false);
+      }
       setLockThreadJumpSidebarOverlayTransition(true);
-      setShowThreadJumpSidebarOverlay(true);
-      return;
-    }
-
-    setShowThreadJumpSidebarOverlay(false);
-    setLockThreadJumpSidebarOverlayTransition(true);
-    threadJumpSidebarOverlayTransitionFrameRef.current = window.requestAnimationFrame(() => {
-      threadJumpSidebarOverlayTransitionFrameRef.current = null;
-      setLockThreadJumpSidebarOverlayTransition(false);
-    });
-  }, []);
+      threadJumpSidebarOverlayTransitionFrameRef.current = window.requestAnimationFrame(() => {
+        threadJumpSidebarOverlayTransitionFrameRef.current = null;
+        setLockThreadJumpSidebarOverlayTransition(false);
+      });
+    },
+    [isMobile, openMobile, setOpenMobile],
+  );
 
   useEffect(() => {
     return () => {
@@ -2578,10 +2595,10 @@ export default function Sidebar() {
   }, []);
 
   useEffect(() => {
-    if (open) {
+    if (!isMobile && open) {
       updateThreadJumpSidebarOverlayVisibility(false);
     }
-  }, [open, updateThreadJumpSidebarOverlayVisibility]);
+  }, [isMobile, open, updateThreadJumpSidebarOverlayVisibility]);
 
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryEnvironmentDescriptor = readPrimaryEnvironmentDescriptor();
@@ -3259,7 +3276,7 @@ export default function Sidebar() {
           return threadJumpLabelMapsEqual(current, nextLabelMap) ? current : nextLabelMap;
         });
         updateThreadJumpHintsVisibility(true);
-        if (!open) {
+        if (isMobile || !open) {
           updateThreadJumpSidebarOverlayVisibility(true);
         }
       }
@@ -3335,7 +3352,7 @@ export default function Sidebar() {
         return threadJumpLabelMapsEqual(current, nextLabelMap) ? current : nextLabelMap;
       });
       updateThreadJumpHintsVisibility(true);
-      if (!open) {
+      if (isMobile || !open) {
         updateThreadJumpSidebarOverlayVisibility(true);
       }
     };
@@ -3355,6 +3372,7 @@ export default function Sidebar() {
     };
   }, [
     getCurrentSidebarShortcutContext,
+    isMobile,
     keybindings,
     navigateToThread,
     open,
