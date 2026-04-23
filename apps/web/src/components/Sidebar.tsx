@@ -3281,9 +3281,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
-    updateThreadJumpSidebarOverlayVisibility(
-      isLeftOptionThreadJumpActive && (isMobile || !open),
-    );
+    updateThreadJumpSidebarOverlayVisibility(isLeftOptionThreadJumpActive && (isMobile || !open));
   }, [
     isMobile,
     isLeftOptionThreadJumpActive,

@@ -1,14 +1,9 @@
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 
-import { sortThreads } from "../../lib/threadSort";
-import type { Thread } from "../../types";
+import { getThreadSortTimestamp, type ThreadSortInput } from "../../lib/threadSort";
 
-type ThreadJumpTarget<TId extends string = string> = {
+type ThreadJumpTarget<TId extends string = string> = ThreadSortInput & {
   id: TId;
-  createdAt: Thread["createdAt"];
-  updatedAt?: Thread["updatedAt"];
-  latestUserMessageAt?: string | null;
-  messages?: Thread["messages"];
 };
 
 export function selectThreadJumpThreadIds<T extends ThreadJumpTarget>(
@@ -17,7 +12,15 @@ export function selectThreadJumpThreadIds<T extends ThreadJumpTarget>(
   maxCount: number,
 ): T["id"][] {
   const selectedThreadIds = new Set(
-    sortThreads(threads, sortOrder)
+    threads
+      .toSorted((left, right) => {
+        const rightTimestamp = getThreadSortTimestamp(right, sortOrder);
+        const leftTimestamp = getThreadSortTimestamp(left, sortOrder);
+        const byTimestamp =
+          rightTimestamp === leftTimestamp ? 0 : rightTimestamp > leftTimestamp ? 1 : -1;
+        if (byTimestamp !== 0) return byTimestamp;
+        return right.id.localeCompare(left.id);
+      })
       .slice(0, maxCount)
       .map((thread) => thread.id),
   );

@@ -217,9 +217,7 @@ describe("descriptor helpers", () => {
 
   it("keeps Codex xhigh and fast defaults in descriptor selections", () => {
     const descriptors = getProviderOptionDescriptors({ caps: codexCaps });
-    expect(
-      buildProviderOptionSelectionsFromDescriptors(descriptors),
-    ).toEqual([
+    expect(buildProviderOptionSelectionsFromDescriptors(descriptors)).toEqual([
       { id: "reasoningEffort", value: "xhigh" },
       { id: "fastMode", value: true },
     ]);

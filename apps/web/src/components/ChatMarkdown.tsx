@@ -374,14 +374,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       return;
     }
 
-    void openInPreferredEditor(
-      api,
-      targetPath,
-      {
-        ...(editorRemoteHost ? { remoteHost: editorRemoteHost } : {}),
-        reuseWindow: true,
-      },
-    ).catch((error) => {
+    void openInPreferredEditor(api, targetPath, {
+      ...(editorRemoteHost ? { remoteHost: editorRemoteHost } : {}),
+      reuseWindow: true,
+    }).catch((error) => {
       toastManager.add(
         stackedThreadToast({
           type: "error",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { matchAbsoluteFileRoute } from "./absoluteFileRoute";
+import { matchAbsoluteFileRoute } from "./absoluteFileRoute.js";
 
 describe("matchAbsoluteFileRoute", () => {
   it("matches explicit /file routes for absolute filesystem paths", () => {

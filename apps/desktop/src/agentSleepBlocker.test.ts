@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAgentSleepBlockerController } from "./agentSleepBlocker";
+import { createAgentSleepBlockerController } from "./agentSleepBlocker.js";
 
 function createPowerSaveBlockerStub() {
   const startedIds = new Set<number>();

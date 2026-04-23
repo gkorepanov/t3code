@@ -107,9 +107,13 @@ describe("ChatMarkdown", () => {
       await link.click();
 
       await vi.waitFor(() => {
-        expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), `${filePath}:1:7`, {
-          reuseWindow: true,
-        });
+        expect(openInPreferredEditorMock).toHaveBeenCalledWith(
+          expect.anything(),
+          `${filePath}:1:7`,
+          {
+            reuseWindow: true,
+          },
+        );
       });
     } finally {
       await screen.unmount();
