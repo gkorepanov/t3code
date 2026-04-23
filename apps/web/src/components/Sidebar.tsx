@@ -79,6 +79,7 @@ import {
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
+  formatShortcutLabel,
   resolveShortcutCommand,
   shortcutLabelForCommand,
   shouldShowThreadJumpHints,
@@ -240,6 +241,59 @@ function buildThreadJumpLabelMap(input: {
     }
   }
   return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
+}
+
+function buildLeftOptionThreadJumpLabelMap(input: {
+  platform: string;
+  threadJumpCommandByKey: ReadonlyMap<
+    string,
+    NonNullable<ReturnType<typeof threadJumpCommandForIndex>>
+  >;
+}): ReadonlyMap<string, string> {
+  if (input.threadJumpCommandByKey.size === 0) {
+    return EMPTY_THREAD_JUMP_LABELS;
+  }
+
+  const mapping = new Map<string, string>();
+  for (const [threadKey, command] of input.threadJumpCommandByKey) {
+    const jumpIndex = threadJumpIndexFromCommand(command);
+    if (jumpIndex === null) continue;
+    mapping.set(
+      threadKey,
+      formatShortcutLabel(
+        {
+          key: String(jumpIndex + 1),
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: true,
+          modKey: false,
+        },
+        input.platform,
+      ),
+    );
+  }
+  return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
+}
+
+function shouldUseLeftOptionThreadJump(event: globalThis.KeyboardEvent): boolean {
+  return (
+    (event.altKey || event.code === "AltLeft") &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey
+  );
+}
+
+function threadJumpIndexFromLeftOptionEvent(event: globalThis.KeyboardEvent): number | null {
+  const digitCode = /^Digit([1-9])$/.exec(event.code);
+  if (digitCode) {
+    return Number(digitCode[1]) - 1;
+  }
+  if (/^[1-9]$/.test(event.key)) {
+    return Number(event.key) - 1;
+  }
+  return null;
 }
 
 type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
@@ -3223,6 +3277,7 @@ export default function Sidebar() {
   threadJumpLabelsRef.current = threadJumpLabelByKey;
   const showThreadJumpHintsRef = useRef(showThreadJumpHints);
   showThreadJumpHintsRef.current = showThreadJumpHints;
+  const leftOptionThreadJumpHeldRef = useRef(false);
   const visibleThreadJumpLabelByKey =
     showThreadJumpHints || showThreadJumpSidebarOverlay
       ? threadJumpLabelByKey
@@ -3250,14 +3305,22 @@ export default function Sidebar() {
       threadJumpLabelsRef.current === EMPTY_THREAD_JUMP_LABELS;
 
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.code === "AltLeft") {
+        leftOptionThreadJumpHeldRef.current = true;
+      }
       if (shouldIgnoreThreadJumpHintUpdate(event)) {
         return;
       }
       const shortcutContext = getCurrentSidebarShortcutContext();
-      const shouldShowHints = shouldShowThreadJumpHints(event, keybindings, {
-        platform,
-        context: shortcutContext,
-      });
+      const shouldShowLeftOptionHints =
+        leftOptionThreadJumpHeldRef.current && shouldUseLeftOptionThreadJump(event);
+      const shouldShowConfiguredHints =
+        !shouldShowLeftOptionHints &&
+        shouldShowThreadJumpHints(event, keybindings, {
+          platform,
+          context: shortcutContext,
+        });
+      const shouldShowHints = shouldShowLeftOptionHints || shouldShowConfiguredHints;
       if (!shouldShowHints) {
         if (
           showThreadJumpHintsRef.current ||
@@ -3267,21 +3330,49 @@ export default function Sidebar() {
         }
       } else {
         setThreadJumpLabelByKey((current) => {
-          const nextLabelMap = buildThreadJumpLabelMap({
-            keybindings,
-            platform,
-            terminalOpen: shortcutContext.terminalOpen,
-            threadJumpCommandByKey,
-          });
+          const nextLabelMap = shouldShowLeftOptionHints
+            ? buildLeftOptionThreadJumpLabelMap({
+                platform,
+                threadJumpCommandByKey,
+              })
+            : buildThreadJumpLabelMap({
+                keybindings,
+                platform,
+                terminalOpen: shortcutContext.terminalOpen,
+                threadJumpCommandByKey,
+              });
           return threadJumpLabelMapsEqual(current, nextLabelMap) ? current : nextLabelMap;
         });
         updateThreadJumpHintsVisibility(true);
-        if (isMobile || !open) {
+        if (shouldShowLeftOptionHints && (isMobile || !open)) {
           updateThreadJumpSidebarOverlayVisibility(true);
         }
       }
 
       if (event.defaultPrevented || event.repeat) {
+        return;
+      }
+
+      const leftOptionJumpIndex = shouldShowLeftOptionHints
+        ? threadJumpIndexFromLeftOptionEvent(event)
+        : null;
+      if (leftOptionJumpIndex !== null) {
+        const targetThreadKey = threadJumpThreadKeys[leftOptionJumpIndex];
+        if (!targetThreadKey) {
+          return;
+        }
+        const targetThread = sidebarThreadByKey.get(targetThreadKey);
+        if (!targetThread) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
+        return;
+      }
+
+      if (isMobile ? !openMobile : !open) {
         return;
       }
 
@@ -3330,34 +3421,48 @@ export default function Sidebar() {
     };
 
     const onWindowKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.code === "AltLeft") {
+        leftOptionThreadJumpHeldRef.current = false;
+      }
       if (shouldIgnoreThreadJumpHintUpdate(event)) {
         return;
       }
       const shortcutContext = getCurrentSidebarShortcutContext();
-      const shouldShowHints = shouldShowThreadJumpHints(event, keybindings, {
-        platform,
-        context: shortcutContext,
-      });
+      const shouldShowLeftOptionHints =
+        leftOptionThreadJumpHeldRef.current && shouldUseLeftOptionThreadJump(event);
+      const shouldShowConfiguredHints =
+        !shouldShowLeftOptionHints &&
+        shouldShowThreadJumpHints(event, keybindings, {
+          platform,
+          context: shortcutContext,
+        });
+      const shouldShowHints = shouldShowLeftOptionHints || shouldShowConfiguredHints;
       if (!shouldShowHints) {
         clearThreadJumpHints();
         return;
       }
       setThreadJumpLabelByKey((current) => {
-        const nextLabelMap = buildThreadJumpLabelMap({
-          keybindings,
-          platform,
-          terminalOpen: shortcutContext.terminalOpen,
-          threadJumpCommandByKey,
-        });
+        const nextLabelMap = shouldShowLeftOptionHints
+          ? buildLeftOptionThreadJumpLabelMap({
+              platform,
+              threadJumpCommandByKey,
+            })
+          : buildThreadJumpLabelMap({
+              keybindings,
+              platform,
+              terminalOpen: shortcutContext.terminalOpen,
+              threadJumpCommandByKey,
+            });
         return threadJumpLabelMapsEqual(current, nextLabelMap) ? current : nextLabelMap;
       });
       updateThreadJumpHintsVisibility(true);
-      if (isMobile || !open) {
+      if (shouldShowLeftOptionHints && (isMobile || !open)) {
         updateThreadJumpSidebarOverlayVisibility(true);
       }
     };
 
     const onWindowBlur = () => {
+      leftOptionThreadJumpHeldRef.current = false;
       clearThreadJumpHints();
     };
 
@@ -3376,6 +3481,7 @@ export default function Sidebar() {
     keybindings,
     navigateToThread,
     open,
+    openMobile,
     orderedSidebarThreadKeys,
     platform,
     routeThreadKey,
