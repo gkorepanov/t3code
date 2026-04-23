@@ -73,6 +73,7 @@ import {
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
+  formatShortcutLabel,
   resolveShortcutCommand,
   shortcutLabelForCommand,
   shouldShowThreadJumpHintsForModifiers,
@@ -261,6 +262,50 @@ function buildThreadJumpLabelMap(input: {
     }
   }
   return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
+}
+
+function buildLeftOptionThreadJumpLabelMap(input: {
+  platform: string;
+  threadJumpCommandByKey: ReadonlyMap<
+    string,
+    NonNullable<ReturnType<typeof threadJumpCommandForIndex>>
+  >;
+}): ReadonlyMap<string, string> {
+  if (input.threadJumpCommandByKey.size === 0) {
+    return EMPTY_THREAD_JUMP_LABELS;
+  }
+
+  const mapping = new Map<string, string>();
+  for (const [threadKey, command] of input.threadJumpCommandByKey) {
+    const jumpIndex = threadJumpIndexFromCommand(command);
+    if (jumpIndex === null) continue;
+    mapping.set(
+      threadKey,
+      formatShortcutLabel(
+        {
+          key: String(jumpIndex + 1),
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: true,
+          modKey: false,
+        },
+        input.platform,
+      ),
+    );
+  }
+  return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
+}
+
+function threadJumpIndexFromLeftOptionEvent(event: globalThis.KeyboardEvent): number | null {
+  const digitCode = /^Digit([1-9])$/.exec(event.code);
+  if (digitCode) {
+    return Number(digitCode[1]) - 1;
+  }
+  if (/^[1-9]$/.test(event.key)) {
+    return Number(event.key) - 1;
+  }
+  return null;
 }
 
 interface SidebarThreadRowProps {
@@ -3142,7 +3187,7 @@ export default function Sidebar() {
     }),
     [modelPickerOpen, routeThreadRef],
   );
-  const threadJumpLabelByKey = useMemo(
+  const configuredThreadJumpLabelByKey = useMemo(
     () =>
       buildThreadJumpLabelMap({
         keybindings,
@@ -3152,7 +3197,24 @@ export default function Sidebar() {
       }),
     [keybindings, platform, sidebarShortcutContext.terminalOpen, threadJumpCommandByKey],
   );
-  const shouldShowThreadJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
+  const [isLeftOptionThreadJumpHeld, setIsLeftOptionThreadJumpHeld] = useState(false);
+  const isLeftOptionThreadJumpActive =
+    isLeftOptionThreadJumpHeld &&
+    !shortcutModifiers.metaKey &&
+    !shortcutModifiers.ctrlKey &&
+    !shortcutModifiers.shiftKey;
+  const leftOptionThreadJumpLabelByKey = useMemo(
+    () =>
+      buildLeftOptionThreadJumpLabelMap({
+        platform,
+        threadJumpCommandByKey,
+      }),
+    [platform, threadJumpCommandByKey],
+  );
+  const threadJumpLabelByKey = isLeftOptionThreadJumpActive
+    ? leftOptionThreadJumpLabelByKey
+    : configuredThreadJumpLabelByKey;
+  const shouldShowConfiguredThreadJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
     shortcutModifiers,
     keybindings,
     {
@@ -3160,6 +3222,8 @@ export default function Sidebar() {
       context: sidebarShortcutContext,
     },
   );
+  const shouldShowThreadJumpHintsNow =
+    isLeftOptionThreadJumpActive || shouldShowConfiguredThreadJumpHintsNow;
   const visibleThreadJumpLabelByKey =
     showThreadJumpHints || showThreadJumpSidebarOverlay
       ? threadJumpLabelByKey
@@ -3191,10 +3255,38 @@ export default function Sidebar() {
   }, [prewarmedSidebarThreadRefs]);
 
   useEffect(() => {
+    const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.code === "AltLeft") {
+        setIsLeftOptionThreadJumpHeld(true);
+      }
+    };
+    const onWindowKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.code === "AltLeft") {
+        setIsLeftOptionThreadJumpHeld(false);
+      }
+    };
+    const onWindowBlur = () => {
+      setIsLeftOptionThreadJumpHeld(false);
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown);
+    window.addEventListener("keyup", onWindowKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown);
+      window.removeEventListener("keyup", onWindowKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, []);
+
+  useEffect(() => {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
-    updateThreadJumpSidebarOverlayVisibility(shouldShowThreadJumpHintsNow && (isMobile || !open));
+    updateThreadJumpSidebarOverlayVisibility(
+      isLeftOptionThreadJumpActive && (isMobile || !open),
+    );
   }, [
     isMobile,
+    isLeftOptionThreadJumpActive,
     open,
     shouldShowThreadJumpHintsNow,
     updateThreadJumpHintsVisibility,
@@ -3206,6 +3298,29 @@ export default function Sidebar() {
       const shortcutContext = getCurrentSidebarShortcutContext();
 
       if (event.defaultPrevented || event.repeat) {
+        return;
+      }
+
+      const leftOptionJumpIndex = isLeftOptionThreadJumpActive
+        ? threadJumpIndexFromLeftOptionEvent(event)
+        : null;
+      if (leftOptionJumpIndex !== null) {
+        const targetThreadKey = threadJumpThreadKeys[leftOptionJumpIndex];
+        if (!targetThreadKey) {
+          return;
+        }
+        const targetThread = sidebarThreadByKey.get(targetThreadKey);
+        if (!targetThread) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
+        return;
+      }
+
+      if (isMobile ? !openMobile : !open) {
         return;
       }
 
@@ -3260,8 +3375,12 @@ export default function Sidebar() {
     };
   }, [
     getCurrentSidebarShortcutContext,
+    isLeftOptionThreadJumpActive,
+    isMobile,
     keybindings,
     navigateToThread,
+    open,
+    openMobile,
     orderedSidebarThreadKeys,
     platform,
     routeThreadKey,
