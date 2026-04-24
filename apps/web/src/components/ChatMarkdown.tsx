@@ -4,6 +4,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
   Children,
   Suspense,
+  type ImgHTMLAttributes,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
   use,
@@ -38,7 +39,10 @@ import {
   shouldHandleMarkdownFileLinkClick,
   shouldPreviewMarkdownFileLinkClick,
 } from "./chatMarkdownLinkBehavior";
-import { ChatMarkdownFilePreviewDialog } from "./ChatMarkdownFilePreviewDialog";
+import {
+  ChatMarkdownFilePreviewDialog,
+  resolveMarkdownFilePreviewRequestInit,
+} from "./ChatMarkdownFilePreviewDialog";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -515,6 +519,89 @@ function areMarkdownFileLinkPropsEqual(
   );
 }
 
+function MarkdownFileImage({
+  src,
+  environmentId,
+  targetPath,
+  ...props
+}: ImgHTMLAttributes<HTMLImageElement> & {
+  environmentId: EnvironmentId | undefined;
+  targetPath: string | null;
+}) {
+  const savedEnvironmentRecord = useSavedEnvironmentRegistryStore((state) =>
+    environmentId ? (state.byId[environmentId] ?? null) : null,
+  );
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const shouldFetchWithAuth =
+    typeof src === "string" &&
+    src.length > 0 &&
+    environmentId !== undefined &&
+    targetPath !== null &&
+    savedEnvironmentRecord !== null;
+
+  useEffect(() => {
+    if (!shouldFetchWithAuth || typeof src !== "string" || !environmentId || !targetPath) {
+      setObjectUrl(null);
+      setLoadFailed(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let disposed = false;
+    let nextObjectUrl: string | null = null;
+    setObjectUrl(null);
+    setLoadFailed(false);
+
+    let fetchUrl: string;
+    try {
+      fetchUrl = new URL(src, window.location.href).toString();
+    } catch {
+      setLoadFailed(true);
+      return;
+    }
+
+    void resolveMarkdownFilePreviewRequestInit({
+      browserHref: src,
+      environmentId,
+      targetPath,
+    })
+      .then((requestInit) =>
+        fetch(fetchUrl, {
+          ...requestInit,
+          signal: controller.signal,
+        }),
+      )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load image (${response.status}).`);
+        }
+
+        const blob = await response.blob();
+        if (!disposed) {
+          nextObjectUrl = URL.createObjectURL(blob);
+          setObjectUrl(nextObjectUrl);
+        }
+      })
+      .catch(() => {
+        if (!disposed && !controller.signal.aborted) {
+          setLoadFailed(true);
+        }
+      });
+
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (nextObjectUrl) {
+        URL.revokeObjectURL(nextObjectUrl);
+      }
+    };
+  }, [environmentId, shouldFetchWithAuth, src, targetPath]);
+
+  const renderedSrc = objectUrl ?? (shouldFetchWithAuth && !loadFailed ? undefined : src);
+  return <img {...props} src={renderedSrc} />;
+}
+
 function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMarkdownProps) {
   const settings = useSettings();
   const browserFileLinkPrefix = settings.browserFileLinkPrefix;
@@ -613,7 +700,14 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
           environmentId,
           href: src,
         });
-        return <img {...props} src={imageBehavior.browserHref} />;
+        return (
+          <MarkdownFileImage
+            {...props}
+            src={imageBehavior.browserHref}
+            environmentId={environmentId}
+            targetPath={imageBehavior.targetPath}
+          />
+        );
       },
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
