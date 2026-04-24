@@ -1,3 +1,12 @@
+const CLIPBOARD_WRITE_PERMISSION = "clipboard-sanitized-write";
+
+export function shouldAllowDesktopPermissionRequest(permission: string, details: unknown): boolean {
+  if (permission === CLIPBOARD_WRITE_PERMISSION) {
+    return true;
+  }
+  return permission === "media" && shouldAllowMediaPermissionRequest(details);
+}
+
 export function shouldAllowMediaPermissionRequest(details: unknown): boolean {
   const mediaTypes =
     typeof details === "object" &&

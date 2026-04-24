@@ -20,14 +20,9 @@ export function useCopyToClipboard<TContext = void>({
   timeoutRef.current = timeout;
 
   const copyToClipboard = React.useCallback((value: string, ctx: TContext): void => {
-    if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-      onErrorRef.current?.(new Error("Clipboard API unavailable."), ctx);
-      return;
-    }
-
     if (!value) return;
 
-    navigator.clipboard.writeText(value).then(
+    writeTextToClipboard(value).then(
       () => {
         if (timeoutIdRef.current) {
           clearTimeout(timeoutIdRef.current);
@@ -63,4 +58,48 @@ export function useCopyToClipboard<TContext = void>({
   }, []);
 
   return { copyToClipboard, isCopied };
+}
+
+export async function writeTextToClipboard(value: string): Promise<void> {
+  let browserError: unknown = null;
+
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch (error) {
+      browserError = error;
+    }
+  }
+
+  if (typeof window !== "undefined" && window.desktopBridge?.writeClipboardText) {
+    try {
+      await window.desktopBridge.writeClipboardText(value);
+      return;
+    } catch (desktopError) {
+      throw combineClipboardErrors(browserError, desktopError);
+    }
+  }
+
+  if (browserError) {
+    throw toError(browserError);
+  }
+
+  throw new Error("Clipboard API unavailable.");
+}
+
+function combineClipboardErrors(browserError: unknown, desktopError: unknown): Error {
+  const fallbackMessage = toError(desktopError).message;
+  if (!browserError) {
+    return new Error(fallbackMessage);
+  }
+
+  const browserMessage = toError(browserError).message;
+  return new Error(
+    `Desktop clipboard fallback failed: ${fallbackMessage}. Browser clipboard failed first: ${browserMessage}`,
+  );
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }

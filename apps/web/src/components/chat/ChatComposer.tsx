@@ -112,6 +112,7 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { shouldSubmitComposerOnEnter } from "./composerEnterBehavior";
 import { RunningStopButton } from "./RunningStopButton";
 import { resolveRunningComposerControls } from "./runningComposerControls";
+import { isElectron } from "../../env";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -1999,7 +2000,7 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {!showInlineRunningStopButton && !showSeparateRunningStopButton ? (
+                  {!isElectron && !showInlineRunningStopButton && !showSeparateRunningStopButton ? (
                     <ComposerVoiceControl
                       environmentId={environmentId}
                       cwd={gitCwd}

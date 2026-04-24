@@ -80,7 +80,7 @@ import {
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
-import { shouldAllowMediaPermissionRequest } from "./mediaPermissions.ts";
+import { shouldAllowDesktopPermissionRequest } from "./mediaPermissions.ts";
 
 syncShellEnvironment();
 
@@ -90,6 +90,7 @@ const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const OPEN_AUTH_WINDOW_CHANNEL = "desktop:open-auth-window";
+const WRITE_CLIPBOARD_TEXT_CHANNEL = "desktop:write-clipboard-text";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
@@ -1894,6 +1895,14 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.removeHandler(WRITE_CLIPBOARD_TEXT_CHANNEL);
+  ipcMain.handle(WRITE_CLIPBOARD_TEXT_CHANNEL, async (_event, rawText: unknown) => {
+    if (typeof rawText !== "string") {
+      throw new Error("Invalid clipboard text.");
+    }
+    clipboard.writeText(rawText);
+  });
+
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
@@ -2101,7 +2110,18 @@ function createWindow(): BrowserWindow {
   });
   window.webContents.session.setPermissionRequestHandler(
     (_webContents, permission, callback, details) => {
-      callback(permission === "media" && shouldAllowMediaPermissionRequest(details));
+      callback(
+        _webContents.id === window.webContents.id &&
+          shouldAllowDesktopPermissionRequest(permission, details),
+      );
+    },
+  );
+  window.webContents.session.setPermissionCheckHandler(
+    (_webContents, permission, _origin, details) => {
+      return (
+        _webContents?.id === window.webContents.id &&
+        shouldAllowDesktopPermissionRequest(permission, details)
+      );
     },
   );
 

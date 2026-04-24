@@ -570,6 +570,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     const defaultSettings = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
     return !Equal.equals(currentSettings, defaultSettings);
   });
+  const isVoiceTranscriptionDirty =
+    !isElectron &&
+    settings.voiceTranscription.openaiApiKey !==
+      DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey;
 
   const changedSettingLabels = useMemo(
     () => [
@@ -592,10 +596,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
-      ...(settings.voiceTranscription.openaiApiKey !==
-      DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey
-        ? ["Voice transcription"]
-        : []),
+      ...(isVoiceTranscriptionDirty ? ["Voice transcription"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
@@ -622,9 +623,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserFileLinkPrefix,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      isVoiceTranscriptionDirty,
       settings.requireMetaEnterToSend,
       settings.timestampFormat,
-      settings.voiceTranscription.openaiApiKey,
       theme,
     ],
   );
@@ -1072,41 +1073,43 @@ export function GeneralSettingsPanel() {
 
         <DesktopAgentSleepSettingsRow />
 
-        <SettingsRow
-          title="Voice transcription"
-          description="OpenAI API key used only for voice input transcription with gpt-4o-transcribe."
-          resetAction={
-            settings.voiceTranscription.openaiApiKey !==
-            DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey ? (
-              <SettingResetButton
-                label="voice transcription API key"
-                onClick={() =>
+        {!isElectron ? (
+          <SettingsRow
+            title="Voice transcription"
+            description="OpenAI API key used only for voice input transcription with gpt-4o-transcribe."
+            resetAction={
+              settings.voiceTranscription.openaiApiKey !==
+              DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey ? (
+                <SettingResetButton
+                  label="voice transcription API key"
+                  onClick={() =>
+                    updateSettings({
+                      voiceTranscription: {
+                        openaiApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey,
+                      },
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Input
+                className="w-full sm:w-80"
+                type="password"
+                value={settings.voiceTranscription.openaiApiKey}
+                placeholder="sk-..."
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="OpenAI API key for voice transcription"
+                onChange={(event) =>
                   updateSettings({
-                    voiceTranscription: {
-                      openaiApiKey: DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey,
-                    },
+                    voiceTranscription: { openaiApiKey: event.target.value },
                   })
                 }
               />
-            ) : null
-          }
-          control={
-            <Input
-              className="w-full sm:w-80"
-              type="password"
-              value={settings.voiceTranscription.openaiApiKey}
-              placeholder="sk-..."
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="OpenAI API key for voice transcription"
-              onChange={(event) =>
-                updateSettings({
-                  voiceTranscription: { openaiApiKey: event.target.value },
-                })
-              }
-            />
-          }
-        />
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Task sidebar"
