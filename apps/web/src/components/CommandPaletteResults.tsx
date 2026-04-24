@@ -5,6 +5,7 @@ import {
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
   type CommandPaletteSubmenuItem,
+  type CommandPaletteTextSegment,
 } from "./CommandPalette.logic";
 import {
   CommandCollection,
@@ -68,6 +69,16 @@ function CommandPaletteResultRow(props: {
   const shortcutLabel = props.item.shortcutCommand
     ? shortcutLabelForCommand(props.keybindings, props.item.shortcutCommand)
     : null;
+  const title = props.item.titleSegments ? (
+    <CommandPaletteMatchedText segments={props.item.titleSegments} />
+  ) : (
+    props.item.title
+  );
+  const description = props.item.descriptionSegments ? (
+    <CommandPaletteMatchedText segments={props.item.descriptionSegments} />
+  ) : (
+    props.item.description
+  );
 
   return (
     <CommandItem
@@ -88,17 +99,15 @@ function CommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">{title}</span>
             {props.item.titleTrailingContent}
           </span>
-          <span className="truncate text-muted-foreground/70 text-xs">
-            {props.item.description}
-          </span>
+          <span className="truncate text-muted-foreground/70 text-xs">{description}</span>
         </span>
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">{title}</span>
           {props.item.titleTrailingContent}
         </span>
       )}
@@ -113,4 +122,19 @@ function CommandPaletteResultRow(props: {
       ) : null}
     </CommandItem>
   );
+}
+
+function CommandPaletteMatchedText(props: { segments: ReadonlyArray<CommandPaletteTextSegment> }) {
+  let offset = 0;
+  return props.segments.map((segment) => {
+    const key = `${offset}:${segment.matched ? "1" : "0"}:${segment.text}`;
+    offset += segment.text.length;
+    return segment.matched ? (
+      <strong key={key} className="font-semibold text-foreground">
+        {segment.text}
+      </strong>
+    ) : (
+      <span key={key}>{segment.text}</span>
+    );
+  });
 }

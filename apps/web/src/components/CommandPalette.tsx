@@ -1,6 +1,6 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
+import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   type EnvironmentId,
@@ -66,6 +66,7 @@ import { cn, isMacPlatform, isWindowsPlatform, newCommandId, newProjectId } from
 import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
+  selectThreadsAcrossEnvironments,
   useStore,
 } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
@@ -218,6 +219,7 @@ function OpenCommandPaletteDialog() {
     useHandleNewThread();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const fullThreads = useStore(useShallow(selectThreadsAcrossEnvironments));
   const keybindings = useServerKeybindings();
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
@@ -496,11 +498,35 @@ function OpenCommandPaletteDialog() {
       settings.defaultThreadEnvMode,
     ],
   );
+  const threadMessagesByKey = useMemo(
+    () =>
+      new Map(
+        fullThreads.map(
+          (thread) =>
+            [
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              thread.messages,
+            ] as const,
+        ),
+      ),
+    [fullThreads],
+  );
+  const threadsWithSearchText = useMemo(
+    () =>
+      threads.map((thread) => ({
+        ...thread,
+        messages:
+          threadMessagesByKey.get(
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          ) ?? [],
+      })),
+    [threadMessagesByKey, threads],
+  );
 
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
-        threads,
+        threads: threadsWithSearchText,
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
         sortOrder: settings.sidebarThreadSortOrder,
@@ -514,7 +540,13 @@ function OpenCommandPaletteDialog() {
           });
         },
       }),
-    [activeThreadId, navigate, projectTitleById, settings.sidebarThreadSortOrder, threads],
+    [
+      activeThreadId,
+      navigate,
+      projectTitleById,
+      settings.sidebarThreadSortOrder,
+      threadsWithSearchText,
+    ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 

@@ -3,11 +3,23 @@ import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
-import { type Project, type SidebarThreadSummary, type Thread } from "../types";
+import { type ChatMessage, type Project, type SidebarThreadSummary, type Thread } from "../types";
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground/80";
 export const ADDON_ICON_CLASS = "size-4";
+const MESSAGE_SNIPPET_MAX_CHARS = 120;
+const MESSAGE_SNIPPET_CONTEXT_CHARS = 36;
+
+export interface CommandPaletteTextSegment {
+  readonly text: string;
+  readonly matched: boolean;
+}
+
+interface CommandPaletteThreadSearchPayload {
+  readonly title: string;
+  readonly messages: ReadonlyArray<Pick<ChatMessage, "role" | "text">>;
+}
 
 export interface CommandPaletteItem {
   readonly kind: "action" | "submenu";
@@ -15,6 +27,8 @@ export interface CommandPaletteItem {
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
   readonly description?: string;
+  readonly titleSegments?: ReadonlyArray<CommandPaletteTextSegment>;
+  readonly descriptionSegments?: ReadonlyArray<CommandPaletteTextSegment>;
   readonly timestamp?: string;
   readonly icon: ReactNode;
   /** Optional content rendered inline before the title text. */
@@ -22,6 +36,7 @@ export interface CommandPaletteItem {
   /** Optional content rendered inline after the title text (before the timestamp). */
   readonly titleTrailingContent?: ReactNode;
   readonly shortcutCommand?: KeybindingCommand;
+  readonly threadSearch?: CommandPaletteThreadSearchPayload;
 }
 
 export interface CommandPaletteActionItem extends CommandPaletteItem {
@@ -83,8 +98,12 @@ export function filterBrowseEntries(input: {
   return { filteredEntries, highlightedEntry, exactEntry };
 }
 
+function cleanSearchText(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 export function normalizeSearchText(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  return cleanSearchText(value).toLowerCase();
 }
 
 export function buildProjectActionItems(input: {
@@ -112,6 +131,7 @@ export type BuildThreadActionItemsThread = Pick<
 > & {
   updatedAt?: string | undefined;
   latestUserMessageAt?: string | null;
+  messages?: Thread["messages"];
 };
 
 export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
@@ -165,6 +185,14 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
       },
       leadingContent ? { titleLeadingContent: leadingContent } : {},
       trailingContent ? { titleTrailingContent: trailingContent } : {},
+      thread.messages
+        ? {
+            threadSearch: {
+              title: thread.title,
+              messages: thread.messages,
+            },
+          }
+        : {},
       {
         run: async () => {
           await input.runThread(thread);
@@ -174,18 +202,107 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
-function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
-  const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
+interface SearchTextMatch {
+  readonly cleanedText: string;
+  readonly normalizedText: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+function findSearchTextMatch(value: string, normalizedQuery: string): SearchTextMatch | null {
+  const cleanedText = cleanSearchText(value);
+  const normalizedText = cleanedText.toLowerCase();
+  const start = normalizedText.indexOf(normalizedQuery);
+  if (start < 0) {
+    return null;
+  }
+
+  return {
+    cleanedText,
+    normalizedText,
+    start,
+    end: start + normalizedQuery.length,
+  };
+}
+
+function rankSearchTextMatch(match: SearchTextMatch | null, normalizedQuery: string): number {
+  if (!match) {
     return Number.NEGATIVE_INFINITY;
   }
-  if (normalizedField === normalizedQuery) {
+  if (match.normalizedText === normalizedQuery) {
     return 3;
   }
-  if (normalizedField.startsWith(normalizedQuery)) {
+  if (match.normalizedText.startsWith(normalizedQuery)) {
     return 2;
   }
   return 1;
+}
+
+function buildHighlightedSegments(
+  match: SearchTextMatch,
+  options?: { maxChars?: number },
+): CommandPaletteTextSegment[] {
+  const maxChars = options?.maxChars ?? Number.POSITIVE_INFINITY;
+  const contextChars = MESSAGE_SNIPPET_CONTEXT_CHARS;
+  let start = 0;
+  let end = match.cleanedText.length;
+
+  if (match.cleanedText.length > maxChars) {
+    start = Math.max(0, match.start - contextChars);
+    end = Math.min(match.cleanedText.length, Math.max(match.end + contextChars, start + maxChars));
+    if (end - start > maxChars) {
+      end = start + maxChars;
+    }
+    if (match.end > end) {
+      end = Math.min(match.cleanedText.length, match.end);
+      start = Math.max(0, end - maxChars);
+    }
+    if (match.start < start) {
+      start = match.start;
+      end = Math.min(match.cleanedText.length, start + maxChars);
+    }
+  }
+
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < match.cleanedText.length ? "..." : "";
+  const displayText = `${prefix}${match.cleanedText.slice(start, end)}${suffix}`;
+  const relativeStart = prefix.length + match.start - start;
+  const relativeEnd = prefix.length + match.end - start;
+  const segments: CommandPaletteTextSegment[] = [];
+
+  if (relativeStart > 0) {
+    segments.push({ text: displayText.slice(0, relativeStart), matched: false });
+  }
+  segments.push({ text: displayText.slice(relativeStart, relativeEnd), matched: true });
+  if (relativeEnd < displayText.length) {
+    segments.push({ text: displayText.slice(relativeEnd), matched: false });
+  }
+
+  return segments.filter((segment) => segment.text.length > 0);
+}
+
+function findBestMessageMatch(
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "text">>,
+  normalizedQuery: string,
+): { match: SearchTextMatch; rank: number } | null {
+  let best: { match: SearchTextMatch; rank: number } | null = null;
+
+  for (const message of messages) {
+    if (message.role !== "user" && message.role !== "assistant") {
+      continue;
+    }
+
+    const match = findSearchTextMatch(message.text, normalizedQuery);
+    const rank = rankSearchTextMatch(match, normalizedQuery);
+    if (!match || rank === Number.NEGATIVE_INFINITY) {
+      continue;
+    }
+    if (!best || rank > best.rank) {
+      best = { match, rank };
+    }
+  }
+
+  return best ? { match: best.match, rank: best.rank } : null;
 }
 
 function rankCommandPaletteItemMatch(
@@ -198,13 +315,80 @@ function rankCommandPaletteItemMatch(
   }
 
   for (const [index, field] of terms.entries()) {
-    const fieldRank = rankSearchFieldMatch(field, normalizedQuery);
+    const fieldRank = rankSearchTextMatch(
+      findSearchTextMatch(field, normalizedQuery),
+      normalizedQuery,
+    );
     if (fieldRank !== Number.NEGATIVE_INFINITY) {
       return 1_000 - index * 100 + fieldRank;
     }
   }
 
   return 0;
+}
+
+function resolveThreadSearchItemMatch(
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
+  normalizedQuery: string,
+): { item: CommandPaletteActionItem | CommandPaletteSubmenuItem; rank: number } | null {
+  if (!item.threadSearch) {
+    return null;
+  }
+
+  const titleMatch = findSearchTextMatch(item.threadSearch.title, normalizedQuery);
+  const titleRank = rankSearchTextMatch(titleMatch, normalizedQuery);
+  if (titleMatch && titleRank !== Number.NEGATIVE_INFINITY) {
+    return {
+      item: {
+        ...item,
+        titleSegments: buildHighlightedSegments(titleMatch),
+      },
+      rank: 1_000 + titleRank,
+    };
+  }
+
+  const messageMatch = findBestMessageMatch(item.threadSearch.messages, normalizedQuery);
+  if (messageMatch) {
+    const descriptionSegments = buildHighlightedSegments(messageMatch.match, {
+      maxChars: MESSAGE_SNIPPET_MAX_CHARS,
+    });
+    return {
+      item: {
+        ...item,
+        description: descriptionSegments.map((segment) => segment.text).join(""),
+        descriptionSegments,
+      },
+      rank: 900 + messageMatch.rank,
+    };
+  }
+
+  const metadataTerms = item.searchTerms.slice(1).filter((term) => term.length > 0);
+  for (const [index, field] of metadataTerms.entries()) {
+    const fieldRank = rankSearchTextMatch(
+      findSearchTextMatch(field, normalizedQuery),
+      normalizedQuery,
+    );
+    if (fieldRank !== Number.NEGATIVE_INFINITY) {
+      return {
+        item,
+        rank: 800 - index * 100 + fieldRank,
+      };
+    }
+  }
+
+  return null;
+}
+
+function resolveCommandPaletteItemMatch(
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
+  normalizedQuery: string,
+): { item: CommandPaletteActionItem | CommandPaletteSubmenuItem; rank: number } | null {
+  return item.threadSearch
+    ? resolveThreadSearchItemMatch(item, normalizedQuery)
+    : (() => {
+        const rank = rankCommandPaletteItemMatch(item, normalizedQuery);
+        return rank > 0 ? { item, rank } : null;
+      })();
 }
 
 export function filterCommandPaletteGroups(input: {
@@ -253,15 +437,15 @@ export function filterCommandPaletteGroups(input: {
   return searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
+        const match = resolveCommandPaletteItemMatch(item, normalizedQuery);
+        if (!match) {
           return null;
         }
 
         return {
-          item,
+          item: match.item,
           index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+          rank: match.rank,
         };
       })
       .filter(

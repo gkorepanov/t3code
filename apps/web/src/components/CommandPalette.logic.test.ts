@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
   buildThreadActionItems,
@@ -137,6 +137,126 @@ describe("buildThreadActionItems", () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.items.map((item) => item.value)).toEqual(["thread:project-context-only"]);
+  });
+
+  it("searches user and assistant messages and exposes a highlighted excerpt", () => {
+    const threadItems = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-message-match"),
+          title: "Fix navbar spacing",
+          messages: [
+            {
+              id: MessageId.make("message-user"),
+              role: "user",
+              text: "Can you check why the deploy button disappears on mobile?",
+              createdAt: "2026-03-02T00:00:00.000Z",
+              streaming: false,
+            },
+          ],
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => undefined,
+    });
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "deploy button",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: threadItems,
+    });
+
+    expect(groups).toHaveLength(1);
+    const item = groups[0]?.items[0];
+    expect(item?.value).toBe("thread:thread-message-match");
+    expect(item?.description).toBe("Can you check why the deploy button disappears on mobile?");
+    expect(item?.descriptionSegments).toContainEqual({
+      text: "deploy button",
+      matched: true,
+    });
+  });
+
+  it("ignores system messages when searching thread text", () => {
+    const threadItems = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-system-only"),
+          title: "Fix navbar spacing",
+          messages: [
+            {
+              id: MessageId.make("message-system"),
+              role: "system",
+              text: "hidden deployment token",
+              createdAt: "2026-03-02T00:00:00.000Z",
+              streaming: false,
+            },
+          ],
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => undefined,
+    });
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "deployment token",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: threadItems,
+    });
+
+    expect(groups).toHaveLength(0);
+  });
+
+  it("ranks message matches ahead of project-name matches", () => {
+    const threadItems = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-project-match"),
+          title: "Fix navbar spacing",
+          updatedAt: "2026-03-20T00:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("thread-message-match"),
+          title: "Button follow-up",
+          createdAt: "2026-03-02T00:00:00.000Z",
+          updatedAt: "2026-03-19T00:00:00.000Z",
+          messages: [
+            {
+              id: MessageId.make("message-assistant"),
+              role: "assistant",
+              text: "The Project query comes from the message body here.",
+              createdAt: "2026-03-02T00:00:00.000Z",
+              streaming: false,
+            },
+          ],
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async (_thread) => undefined,
+    });
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "project",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: threadItems,
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items.map((item) => item.value)).toEqual([
+      "thread:thread-message-match",
+      "thread:thread-project-match",
+    ]);
   });
 
   it("filters archived threads out of thread search items", () => {
