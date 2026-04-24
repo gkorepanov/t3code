@@ -1430,6 +1430,52 @@ async function openCommandPaletteFromTrigger(): Promise<void> {
   );
 }
 
+async function openMobileSidebar(): Promise<void> {
+  const trigger = await waitForElement(
+    () =>
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[data-slot="sidebar-trigger"]'),
+      ).find(
+        (element) =>
+          element.getBoundingClientRect().width > 0 &&
+          element.getBoundingClientRect().height > 0 &&
+          getComputedStyle(element).visibility !== "hidden",
+      ) ?? null,
+    "Visible mobile sidebar trigger did not render.",
+  );
+  trigger.click();
+  await waitForElement(
+    () => document.querySelector('[data-mobile="true"][data-open]'),
+    "Mobile sidebar should have opened.",
+  );
+}
+
+async function tapCommandPaletteBackdrop(): Promise<void> {
+  const backdrop = await waitForElement(
+    () =>
+      document.querySelector<HTMLElement>('[data-slot="command-dialog-backdrop"]:not([hidden])'),
+    "Command palette backdrop did not render.",
+  );
+  backdrop.dispatchEvent(
+    new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      pointerType: "touch",
+    }),
+  );
+  backdrop.dispatchEvent(
+    new PointerEvent("pointerup", {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      pointerType: "touch",
+    }),
+  );
+  backdrop.click();
+  await waitForLayout();
+}
+
 async function waitForNewThreadShortcutLabel(): Promise<void> {
   const newThreadButton = page.getByTestId("new-thread-button");
   await expect.element(newThreadButton).toBeInTheDocument();
@@ -4137,6 +4183,32 @@ describe("ChatView timeline estimator parity (full app)", () => {
         mounted.router,
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread UUID from the command palette.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens and dismisses the command palette from the mobile sidebar trigger", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-command-palette-trigger-test" as MessageId,
+        targetText: "mobile command palette trigger test",
+      }),
+    });
+
+    try {
+      await openMobileSidebar();
+      await openCommandPaletteFromTrigger();
+
+      await expect.element(page.getByTestId("command-palette")).toBeInTheDocument();
+      expect(document.querySelector('[data-mobile="true"][data-open]')).toBeNull();
+
+      await tapCommandPaletteBackdrop();
+      await waitForElement(
+        () => (document.querySelector('[data-testid="command-palette"]') ? null : document.body),
+        "Command palette should close after tapping outside it.",
       );
     } finally {
       await mounted.cleanup();

@@ -2595,29 +2595,52 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     },
     [updateSettings],
   );
+  const { isMobile, setOpenMobile } = useSidebar();
+  const setCommandPaletteOpen = useCommandPaletteStore((store) => store.setOpen);
+  const handleMobileCommandPaletteOpen = useCallback(() => {
+    setOpenMobile(false);
+    setCommandPaletteOpen(true);
+  }, [setCommandPaletteOpen, setOpenMobile]);
+
+  const commandPaletteTriggerContent = (
+    <>
+      <SearchIcon className="size-3.5" />
+      <span className="flex-1 truncate text-left text-xs">Search</span>
+      {commandPaletteShortcutLabel ? (
+        <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
+          {commandPaletteShortcutLabel}
+        </Kbd>
+      ) : null}
+    </>
+  );
 
   return (
     <SidebarContent className="gap-0">
       <SidebarGroup className="px-2 pt-2 pb-1">
         <SidebarMenu>
           <SidebarMenuItem>
-            <CommandDialogTrigger
-              render={
-                <SidebarMenuButton
-                  size="sm"
-                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
-                  data-testid="command-palette-trigger"
-                />
-              }
-            >
-              <SearchIcon className="size-3.5" />
-              <span className="flex-1 truncate text-left text-xs">Search</span>
-              {commandPaletteShortcutLabel ? (
-                <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
-                  {commandPaletteShortcutLabel}
-                </Kbd>
-              ) : null}
-            </CommandDialogTrigger>
+            {isMobile ? (
+              <SidebarMenuButton
+                size="sm"
+                className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                data-testid="command-palette-trigger"
+                onClick={handleMobileCommandPaletteOpen}
+              >
+                {commandPaletteTriggerContent}
+              </SidebarMenuButton>
+            ) : (
+              <CommandDialogTrigger
+                render={
+                  <SidebarMenuButton
+                    size="sm"
+                    className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                    data-testid="command-palette-trigger"
+                  />
+                }
+              >
+                {commandPaletteTriggerContent}
+              </CommandDialogTrigger>
+            )}
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroup>
