@@ -121,6 +121,11 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const VoiceTranscriptionSettings = Schema.Struct({
+  openaiApiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type VoiceTranscriptionSettings = typeof VoiceTranscriptionSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
@@ -144,6 +149,9 @@ export const ServerSettings = Schema.Struct({
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  voiceTranscription: VoiceTranscriptionSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -234,6 +242,11 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
       otlpMetricsUrl: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  voiceTranscription: Schema.optionalKey(
+    Schema.Struct({
+      openaiApiKey: Schema.optionalKey(Schema.String),
     }),
   ),
   providers: Schema.optionalKey(

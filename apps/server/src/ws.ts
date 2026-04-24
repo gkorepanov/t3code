@@ -18,6 +18,7 @@ import {
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
+  ServerVoiceTranscriptionError,
   ThreadId,
   type TerminalEvent,
   WS_METHODS,
@@ -54,6 +55,7 @@ import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptR
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { transcribeVoiceWithOpenAI } from "./voiceTranscription.ts";
 import {
   BootstrapCredentialService,
   type BootstrapCredentialChange,
@@ -772,6 +774,37 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverUpdateSettings, serverSettings.updateSettings(patch), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverTranscribeVoice]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverTranscribeVoice,
+            Effect.gen(function* () {
+              const settings = yield* serverSettings.getSettings;
+              return yield* Effect.tryPromise({
+                try: () => transcribeVoiceWithOpenAI({ request: input, settings }),
+                catch: (cause) =>
+                  new ServerVoiceTranscriptionError({
+                    message:
+                      cause instanceof Error && cause.message.trim().length > 0
+                        ? cause.message
+                        : "Voice transcription failed.",
+                    cause,
+                  }),
+              });
+            }).pipe(
+              Effect.mapError((cause) =>
+                Schema.is(ServerVoiceTranscriptionError)(cause)
+                  ? cause
+                  : new ServerVoiceTranscriptionError({
+                      message:
+                        cause instanceof Error && cause.message.trim().length > 0
+                          ? cause.message
+                          : "Voice transcription failed.",
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.projectsSearchEntries]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsSearchEntries,

@@ -592,6 +592,10 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      extendInfo: {
+        NSMicrophoneUsageDescription:
+          "T3 Code needs microphone access so you can record voice notes and transcribe them into the chat composer.",
+      },
     };
   }
 

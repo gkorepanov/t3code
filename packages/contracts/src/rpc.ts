@@ -74,6 +74,9 @@ import {
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
+  ServerVoiceTranscriptionError,
+  ServerVoiceTranscriptionInput,
+  ServerVoiceTranscriptionResult,
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 
@@ -118,6 +121,7 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverTranscribeVoice: "server.transcribeVoice",
 
   // Streaming subscriptions
   subscribeGitStatus: "subscribeGitStatus",
@@ -154,6 +158,12 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
   payload: Schema.Struct({ patch: ServerSettingsPatch }),
   success: ServerSettings,
   error: ServerSettingsError,
+});
+
+export const WsServerTranscribeVoiceRpc = Rpc.make(WS_METHODS.serverTranscribeVoice, {
+  payload: ServerVoiceTranscriptionInput,
+  success: ServerVoiceTranscriptionResult,
+  error: ServerVoiceTranscriptionError,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
@@ -361,6 +371,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerTranscribeVoiceRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,

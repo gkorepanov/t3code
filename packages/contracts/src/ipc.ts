@@ -28,6 +28,8 @@ import type {
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
+  ServerVoiceTranscriptionInput,
+  ServerVoiceTranscriptionResult,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
 import type {
@@ -230,6 +232,9 @@ export interface LocalApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    transcribeVoice: (
+      input: ServerVoiceTranscriptionInput,
+    ) => Promise<ServerVoiceTranscriptionResult>;
   };
 }
 
@@ -279,6 +284,11 @@ export interface EnvironmentApi {
         onResubscribe?: () => void;
       },
     ) => () => void;
+  };
+  server: {
+    transcribeVoice: (
+      input: ServerVoiceTranscriptionInput,
+    ) => Promise<ServerVoiceTranscriptionResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

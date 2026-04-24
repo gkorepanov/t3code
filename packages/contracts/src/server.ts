@@ -14,6 +14,8 @@ import { ModelCapabilities } from "./model.ts";
 import { ProviderKind } from "./orchestration.ts";
 import { ServerSettings } from "./settings.ts";
 
+export const SERVER_VOICE_TRANSCRIPTION_MAX_AUDIO_BASE64_CHARS = 14 * 1024 * 1024;
+
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal("keybindings.malformed-config"),
   message: TrimmedNonEmptyString,
@@ -242,3 +244,28 @@ export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });
 export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+
+export const ServerVoiceTranscriptionInput = Schema.Struct({
+  provider: ProviderKind,
+  cwd: TrimmedNonEmptyString,
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
+  sampleRateHz: NonNegativeInt,
+  durationMs: NonNegativeInt,
+  audioBase64: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(SERVER_VOICE_TRANSCRIPTION_MAX_AUDIO_BASE64_CHARS),
+  ),
+});
+export type ServerVoiceTranscriptionInput = typeof ServerVoiceTranscriptionInput.Type;
+
+export const ServerVoiceTranscriptionResult = Schema.Struct({
+  text: TrimmedNonEmptyString,
+});
+export type ServerVoiceTranscriptionResult = typeof ServerVoiceTranscriptionResult.Type;
+
+export class ServerVoiceTranscriptionError extends Schema.TaggedErrorClass<ServerVoiceTranscriptionError>()(
+  "ServerVoiceTranscriptionError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}

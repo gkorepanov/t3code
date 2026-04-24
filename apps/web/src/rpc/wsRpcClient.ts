@@ -7,6 +7,7 @@ import {
   type GitStatusStreamEvent,
   type LocalApi,
   ORCHESTRATION_WS_METHODS,
+  type ServerVoiceTranscriptionInput,
   type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -111,6 +112,9 @@ export interface WsRpcClient {
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
+    readonly transcribeVoice: (
+      input: ServerVoiceTranscriptionInput,
+    ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverTranscribeVoice>>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -216,6 +220,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
       updateSettings: (patch) =>
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
+      transcribeVoice: (input) =>
+        transport.request((client) => client[WS_METHODS.serverTranscribeVoice](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeServerConfig]({}),

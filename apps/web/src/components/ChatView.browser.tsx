@@ -204,6 +204,11 @@ function createMockEnvironmentApi(input: {
       browse: input.browse,
     },
     git: {} as EnvironmentApi["git"],
+    server: {
+      transcribeVoice: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["server"]["transcribeVoice"],
+    },
     orchestration: {
       dispatchCommand: input.dispatchCommand,
       getTurnDiff: (() => {

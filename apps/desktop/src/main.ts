@@ -80,6 +80,7 @@ import {
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
+import { shouldAllowMediaPermissionRequest } from "./mediaPermissions.ts";
 
 syncShellEnvironment();
 
@@ -2098,6 +2099,11 @@ function createWindow(): BrowserWindow {
     }
     return { action: "deny" };
   });
+  window.webContents.session.setPermissionRequestHandler(
+    (_webContents, permission, callback, details) => {
+      callback(permission === "media" && shouldAllowMediaPermissionRequest(details));
+    },
+  );
 
   window.on("page-title-updated", (event) => {
     event.preventDefault();

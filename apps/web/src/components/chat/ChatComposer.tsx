@@ -68,6 +68,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ComposerVoiceControl } from "./ComposerVoiceControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -933,6 +934,25 @@ export const ChatComposer = memo(
         setComposerDraftPrompt(composerDraftTarget, nextPrompt);
       },
       [composerDraftTarget, setComposerDraftPrompt],
+    );
+
+    const appendVoiceTranscript = useCallback(
+      (transcript: string) => {
+        const trimmedTranscript = transcript.trim();
+        if (!trimmedTranscript) return;
+        const currentPrompt = promptRef.current;
+        const nextPrompt =
+          currentPrompt.trim().length === 0
+            ? trimmedTranscript
+            : `${currentPrompt.replace(/\s+$/, "")}\n${trimmedTranscript}`;
+        promptRef.current = nextPrompt;
+        setPrompt(nextPrompt);
+        const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
+        setComposerCursor(nextCursor);
+        setComposerTrigger(detectComposerTrigger(nextPrompt, nextPrompt.length));
+        scheduleComposerFocus();
+      },
+      [promptRef, scheduleComposerFocus, setPrompt],
     );
 
     const addComposerImage = useCallback(
@@ -1979,6 +1999,23 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  {!showInlineRunningStopButton && !showSeparateRunningStopButton ? (
+                    <ComposerVoiceControl
+                      environmentId={environmentId}
+                      cwd={gitCwd}
+                      voiceTranscriptionConfigured={Boolean(
+                        settings.voiceTranscription.openaiApiKey.trim(),
+                      )}
+                      disabled={
+                        isConnecting ||
+                        isSendBusy ||
+                        pendingUserInputs.length > 0 ||
+                        activePendingProgress !== null ||
+                        isComposerApprovalState
+                      }
+                      onTranscriptReady={appendVoiceTranscript}
+                    />
+                  ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
