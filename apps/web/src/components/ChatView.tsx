@@ -18,6 +18,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
   TerminalOpenInput,
+  type ThreadMessageQueueItem,
 } from "@t3tools/contracts";
 import {
   parseScopedThreadKey,
@@ -102,7 +103,7 @@ import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { ChevronDownIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, PencilIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -178,6 +179,8 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
+import { Button } from "./ui/button";
+import { Textarea } from "./ui/textarea";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -300,6 +303,107 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
     }, [threadIds]),
   );
 }
+
+const QueuedMessagesPanel = memo(function QueuedMessagesPanel({
+  items,
+  editingItemId,
+  editingText,
+  onEditStart,
+  onEditTextChange,
+  onEditCancel,
+  onEditSave,
+  onSteer,
+  onDelete,
+}: {
+  items: readonly ThreadMessageQueueItem[];
+  editingItemId: string | null;
+  editingText: string;
+  onEditStart: (item: ThreadMessageQueueItem) => void;
+  onEditTextChange: (value: string) => void;
+  onEditCancel: () => void;
+  onEditSave: (item: ThreadMessageQueueItem) => void;
+  onSteer: (item: ThreadMessageQueueItem) => void;
+  onDelete: (item: ThreadMessageQueueItem) => void;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mx-auto mb-2 w-full max-w-208 rounded-md border border-border bg-card/70 px-3 py-2">
+      <div className="mb-1.5 text-xs font-medium text-muted-foreground">Queue ({items.length})</div>
+      <div className="space-y-1.5">
+        {items.map((item) => {
+          const isEditing = editingItemId === item.id;
+          return (
+            <div
+              key={item.id}
+              className="rounded-md border border-border/70 bg-background/60 p-2 text-sm"
+            >
+              {isEditing ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={editingText}
+                    onChange={(event) => onEditTextChange(event.target.value)}
+                    className="min-h-18 resize-y text-sm"
+                  />
+                  <div className="flex justify-end gap-1.5">
+                    <Button size="icon-xs" variant="ghost" onClick={onEditCancel}>
+                      <XIcon />
+                    </Button>
+                    <Button size="icon-xs" onClick={() => onEditSave(item)}>
+                      <CheckIcon />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-w-0 items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-3 whitespace-pre-wrap break-words text-foreground/90">
+                      {item.text}
+                    </div>
+                    {item.attachments.length > 0 ? (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {item.attachments.length} attachment
+                        {item.attachments.length === 1 ? "" : "s"}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Steer queued message"
+                      onClick={() => onSteer(item)}
+                    >
+                      <SendIcon />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Edit queued message"
+                      onClick={() => onEditStart(item)}
+                    >
+                      <PencilIcon />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Delete queued message"
+                      onClick={() => onDelete(item)}
+                    >
+                      <Trash2Icon />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
 
 function formatOutgoingPrompt(params: {
   provider: ProviderKind;
@@ -705,6 +809,11 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
+  const [queuedMessagesByThreadKey, setQueuedMessagesByThreadKey] = useState<
+    Record<string, ThreadMessageQueueItem[]>
+  >({});
+  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
+  const [editingQueuedMessageText, setEditingQueuedMessageText] = useState("");
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -802,6 +911,32 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeQueuedMessages =
+    activeThreadKey && isServerThread ? (queuedMessagesByThreadKey[activeThreadKey] ?? []) : [];
+  useEffect(() => {
+    if (!activeThread || !activeThreadKey || !isServerThread) {
+      return;
+    }
+    const api = readEnvironmentApi(activeThread.environmentId);
+    if (!api) {
+      return;
+    }
+    return api.orchestration.subscribeThreadQueue(
+      { threadId: activeThread.id },
+      (item) => {
+        setQueuedMessagesByThreadKey((existing) => ({
+          ...existing,
+          [activeThreadKey]: [...item.snapshot.items],
+        }));
+      },
+      {
+        onResubscribe: () => {
+          setEditingQueuedMessageId(null);
+          setEditingQueuedMessageText("");
+        },
+      },
+    );
+  }, [activeThread, activeThreadKey, isServerThread]);
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -1566,6 +1701,90 @@ export default function ChatView(props: ChatViewProps) {
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
   }, []);
+  const onEditQueuedMessageStart = useCallback((item: ThreadMessageQueueItem) => {
+    setEditingQueuedMessageId(item.id);
+    setEditingQueuedMessageText(item.text);
+  }, []);
+  const onEditQueuedMessageCancel = useCallback(() => {
+    setEditingQueuedMessageId(null);
+    setEditingQueuedMessageText("");
+  }, []);
+  const onEditQueuedMessageSave = useCallback(
+    async (item: ThreadMessageQueueItem) => {
+      const api = readEnvironmentApi(
+        item.threadId === activeThread?.id ? activeThread.environmentId : environmentId,
+      );
+      if (!api) return;
+      const nextText = editingQueuedMessageText;
+      if (nextText.trim().length === 0 && item.attachments.length === 0) {
+        return;
+      }
+      await api.orchestration
+        .updateQueuedMessage({
+          threadId: item.threadId,
+          id: item.id,
+          text: nextText,
+          updatedAt: new Date().toISOString(),
+        })
+        .then(() => {
+          setEditingQueuedMessageId(null);
+          setEditingQueuedMessageText("");
+        })
+        .catch((err: unknown) => {
+          setThreadError(
+            item.threadId,
+            err instanceof Error ? err.message : "Failed to update queued message.",
+          );
+        });
+    },
+    [activeThread, editingQueuedMessageText, environmentId, setThreadError],
+  );
+  const onDeleteQueuedMessage = useCallback(
+    async (item: ThreadMessageQueueItem) => {
+      const api = readEnvironmentApi(
+        item.threadId === activeThread?.id ? activeThread.environmentId : environmentId,
+      );
+      if (!api) return;
+      await api.orchestration
+        .deleteQueuedMessage({ threadId: item.threadId, id: item.id })
+        .then(() => {
+          if (editingQueuedMessageId === item.id) {
+            setEditingQueuedMessageId(null);
+            setEditingQueuedMessageText("");
+          }
+        })
+        .catch((err: unknown) => {
+          setThreadError(
+            item.threadId,
+            err instanceof Error ? err.message : "Failed to delete queued message.",
+          );
+        });
+    },
+    [activeThread, editingQueuedMessageId, environmentId, setThreadError],
+  );
+  const onSteerQueuedMessage = useCallback(
+    async (item: ThreadMessageQueueItem) => {
+      const api = readEnvironmentApi(
+        item.threadId === activeThread?.id ? activeThread.environmentId : environmentId,
+      );
+      if (!api) return;
+      await api.orchestration
+        .dispatchQueuedMessageNow({ threadId: item.threadId, id: item.id })
+        .then(() => {
+          if (editingQueuedMessageId === item.id) {
+            setEditingQueuedMessageId(null);
+            setEditingQueuedMessageText("");
+          }
+        })
+        .catch((err: unknown) => {
+          setThreadError(
+            item.threadId,
+            err instanceof Error ? err.message : "Failed to steer queued message.",
+          );
+        });
+    },
+    [activeThread, editingQueuedMessageId, environmentId, setThreadError],
+  );
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -2506,6 +2725,66 @@ export default function ChatView(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
+    if (isServerThread && phase === "running") {
+      try {
+        let firstComposerImageName: string | null = null;
+        if (composerImagesSnapshot.length > 0) {
+          firstComposerImageName = composerImagesSnapshot[0]?.name ?? null;
+        }
+        let titleSeed = trimmed;
+        if (!titleSeed) {
+          titleSeed = firstComposerImageName
+            ? `Image: ${firstComposerImageName}`
+            : composerTerminalContextsSnapshot.length > 0
+              ? formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!)
+              : activeThread.title;
+        }
+
+        const turnAttachments = await turnAttachmentsPromise;
+        await api.orchestration.enqueueMessage({
+          id: randomUUID(),
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: turnAttachments,
+          },
+          modelSelection: ctxSelectedModelSelection,
+          titleSeed: truncate(titleSeed),
+          runtimeMode,
+          interactionMode,
+          createdAt: messageCreatedAt,
+        });
+
+        if (expiredTerminalContextCount > 0) {
+          const toastCopy = buildExpiredTerminalContextToastCopy(
+            expiredTerminalContextCount,
+            "omitted",
+          );
+          toastManager.add(
+            stackedThreadToast({
+              type: "warning",
+              title: toastCopy.title,
+              description: toastCopy.description,
+            }),
+          );
+        }
+
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      } catch (err) {
+        setThreadError(
+          threadIdForSend,
+          err instanceof Error ? err.message : "Failed to queue message.",
+        );
+      }
+      sendInFlightRef.current = false;
+      resetLocalDispatch();
+      return;
+    }
     // Scroll to the current end *before* adding the optimistic message.
     // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
     // automatically pins to the new item when the data changes.
@@ -3337,6 +3616,17 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+            <QueuedMessagesPanel
+              items={activeQueuedMessages}
+              editingItemId={editingQueuedMessageId}
+              editingText={editingQueuedMessageText}
+              onEditStart={onEditQueuedMessageStart}
+              onEditTextChange={setEditingQueuedMessageText}
+              onEditCancel={onEditQueuedMessageCancel}
+              onEditSave={onEditQueuedMessageSave}
+              onSteer={onSteerQueuedMessage}
+              onDelete={onDeleteQueuedMessage}
+            />
             <ChatComposer
               ref={composerRef}
               composerDraftTarget={composerDraftTarget}

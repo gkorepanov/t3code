@@ -302,6 +302,39 @@ export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationEnqueueMessageRpc = Rpc.make(ORCHESTRATION_WS_METHODS.enqueueMessage, {
+  payload: OrchestrationRpcSchemas.enqueueMessage.input,
+  success: OrchestrationRpcSchemas.enqueueMessage.output,
+  error: OrchestrationDispatchCommandError,
+});
+
+export const WsOrchestrationUpdateQueuedMessageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.updateQueuedMessage,
+  {
+    payload: OrchestrationRpcSchemas.updateQueuedMessage.input,
+    success: OrchestrationRpcSchemas.updateQueuedMessage.output,
+    error: OrchestrationDispatchCommandError,
+  },
+);
+
+export const WsOrchestrationDeleteQueuedMessageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.deleteQueuedMessage,
+  {
+    payload: OrchestrationRpcSchemas.deleteQueuedMessage.input,
+    success: OrchestrationRpcSchemas.deleteQueuedMessage.output,
+    error: OrchestrationDispatchCommandError,
+  },
+);
+
+export const WsOrchestrationDispatchQueuedMessageNowRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.dispatchQueuedMessageNow,
+  {
+    payload: OrchestrationRpcSchemas.dispatchQueuedMessageNow.input,
+    success: OrchestrationRpcSchemas.dispatchQueuedMessageNow.output,
+    error: OrchestrationDispatchCommandError,
+  },
+);
+
 export const WsOrchestrationGetTurnDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getTurnDiff, {
   payload: OrchestrationGetTurnDiffInput,
   success: OrchestrationRpcSchemas.getTurnDiff.output,
@@ -335,6 +368,16 @@ export const WsOrchestrationSubscribeThreadRpc = Rpc.make(
   {
     payload: OrchestrationRpcSchemas.subscribeThread.input,
     success: OrchestrationRpcSchemas.subscribeThread.output,
+    error: OrchestrationGetSnapshotError,
+    stream: true,
+  },
+);
+
+export const WsOrchestrationSubscribeThreadQueueRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.subscribeThreadQueue,
+  {
+    payload: OrchestrationRpcSchemas.subscribeThreadQueue.input,
+    success: OrchestrationRpcSchemas.subscribeThreadQueue.output,
     error: OrchestrationGetSnapshotError,
     stream: true,
   },
@@ -399,9 +442,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
   WsOrchestrationDispatchCommandRpc,
+  WsOrchestrationEnqueueMessageRpc,
+  WsOrchestrationUpdateQueuedMessageRpc,
+  WsOrchestrationDeleteQueuedMessageRpc,
+  WsOrchestrationDispatchQueuedMessageNowRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsOrchestrationSubscribeThreadQueueRpc,
 );

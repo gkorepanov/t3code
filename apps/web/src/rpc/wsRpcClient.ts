@@ -121,10 +121,23 @@ export interface WsRpcClient {
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
+    readonly enqueueMessage: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.enqueueMessage>;
+    readonly updateQueuedMessage: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.updateQueuedMessage
+    >;
+    readonly deleteQueuedMessage: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.deleteQueuedMessage
+    >;
+    readonly dispatchQueuedMessageNow: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.dispatchQueuedMessageNow
+    >;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
+    readonly subscribeThreadQueue: RpcInputStreamMethod<
+      typeof ORCHESTRATION_WS_METHODS.subscribeThreadQueue
+    >;
   };
 }
 
@@ -244,6 +257,16 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     orchestration: {
       dispatchCommand: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
+      enqueueMessage: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.enqueueMessage](input)),
+      updateQueuedMessage: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.updateQueuedMessage](input)),
+      deleteQueuedMessage: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.deleteQueuedMessage](input)),
+      dispatchQueuedMessageNow: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchQueuedMessageNow](input),
+        ),
       getTurnDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>
@@ -257,6 +280,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       subscribeThread: (input, listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeThread](input),
+          listener,
+          options,
+        ),
+      subscribeThreadQueue: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[ORCHESTRATION_WS_METHODS.subscribeThreadQueue](input),
           listener,
           options,
         ),

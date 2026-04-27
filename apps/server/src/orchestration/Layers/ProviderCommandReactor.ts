@@ -4,8 +4,10 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationThread,
   ProviderKind,
   type OrchestrationSession,
+  type ThreadMessageQueueItem,
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
@@ -29,6 +31,7 @@ import {
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ThreadMessageQueue } from "../Services/ThreadMessageQueue.ts";
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -39,7 +42,8 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
-      | "thread.session-stop-requested";
+      | "thread.session-stop-requested"
+      | "thread.session-set";
   }
 >;
 
@@ -157,6 +161,7 @@ const make = Effect.gen(function* () {
   const gitStatusBroadcaster = yield* GitStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const threadMessageQueue = yield* ThreadMessageQueue;
   const handledTurnStartKeys = yield* Cache.make<string, true>({
     capacity: HANDLED_TURN_START_KEY_MAX,
     timeToLive: HANDLED_TURN_START_KEY_TTL,
@@ -809,6 +814,95 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const applyQueuedTurnSettings = Effect.fn("applyQueuedTurnSettings")(function* (input: {
+    readonly thread: OrchestrationThread;
+    readonly item: ThreadMessageQueueItem;
+  }) {
+    if (
+      input.item.modelSelection !== undefined &&
+      !Equal.equals(input.thread.modelSelection, input.item.modelSelection)
+    ) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.meta.update",
+        commandId: serverCommandId("queued-message-model-selection"),
+        threadId: input.thread.id,
+        modelSelection: input.item.modelSelection,
+      });
+    }
+
+    if (input.thread.runtimeMode !== input.item.runtimeMode) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: serverCommandId("queued-message-runtime-mode"),
+        threadId: input.thread.id,
+        runtimeMode: input.item.runtimeMode,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    if (input.thread.interactionMode !== input.item.interactionMode) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: serverCommandId("queued-message-interaction-mode"),
+        threadId: input.thread.id,
+        interactionMode: input.item.interactionMode,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  });
+
+  const dispatchQueuedMessage = Effect.fn("dispatchQueuedMessage")(function* (
+    item: ThreadMessageQueueItem,
+  ) {
+    const thread = yield* resolveThread(item.threadId);
+    if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) {
+      return;
+    }
+    if (
+      thread.session?.status === "running" ||
+      thread.session?.status === "starting" ||
+      thread.session?.status === "error"
+    ) {
+      return;
+    }
+
+    const dispatchedAt = new Date().toISOString();
+    yield* applyQueuedTurnSettings({ thread, item });
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.start",
+      commandId: item.commandId,
+      threadId: item.threadId,
+      message: {
+        messageId: item.messageId,
+        role: "user",
+        text: item.text,
+        attachments: item.attachments,
+      },
+      ...(item.modelSelection !== undefined ? { modelSelection: item.modelSelection } : {}),
+      ...(item.titleSeed !== undefined ? { titleSeed: item.titleSeed } : {}),
+      runtimeMode: item.runtimeMode,
+      interactionMode: item.interactionMode,
+      ...(item.sourceProposedPlan !== undefined
+        ? { sourceProposedPlan: item.sourceProposedPlan }
+        : {}),
+      createdAt: dispatchedAt,
+    });
+    yield* threadMessageQueue.delete(
+      { threadId: item.threadId, id: item.id },
+      { preserveAttachments: true },
+    );
+  });
+
+  const maybeDispatchNextQueuedMessage = Effect.fn("maybeDispatchNextQueuedMessage")(function* (
+    threadId: ThreadId,
+  ) {
+    const item = yield* threadMessageQueue.getFirstByThreadId(threadId);
+    if (!item) {
+      return;
+    }
+    yield* dispatchQueuedMessage(item);
+  });
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -849,6 +943,14 @@ const make = Effect.gen(function* () {
       case "thread.session-stop-requested":
         yield* processSessionStopRequested(event);
         return;
+      case "thread.session-set":
+        if (
+          event.payload.session.status === "ready" &&
+          event.payload.session.activeTurnId === null
+        ) {
+          yield* maybeDispatchNextQueuedMessage(event.payload.threadId);
+        }
+        return;
     }
   });
 
@@ -875,7 +977,8 @@ const make = Effect.gen(function* () {
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
-        event.type === "thread.session-stop-requested"
+        event.type === "thread.session-stop-requested" ||
+        event.type === "thread.session-set"
       ) {
         return yield* worker.enqueue(event);
       }
@@ -884,6 +987,44 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
     );
+    const queuedThreadIds = yield* threadMessageQueue.listThreadIdsWithItems().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to load queued message threads", {
+          cause: Cause.pretty(cause),
+        }).pipe(Effect.as([] as ThreadId[])),
+      ),
+    );
+    yield* Effect.forEach(
+      queuedThreadIds,
+      (threadId) => {
+        const now = new Date().toISOString();
+        return worker.enqueue({
+          eventId: EventId.make(`queued-startup:${threadId}:${crypto.randomUUID()}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          type: "thread.session-set",
+          sequence: 0,
+          commandId: null,
+          correlationId: null,
+          causationEventId: null,
+          metadata: {},
+          occurredAt: now,
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: null,
+              runtimeMode: DEFAULT_RUNTIME_MODE,
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: now,
+            },
+          },
+        });
+      },
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
   });
 
   return {

@@ -38,8 +38,10 @@ import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { ProviderCommandReactorLive } from "./ProviderCommandReactor.ts";
+import { ThreadMessageQueueLive } from "./ThreadMessageQueue.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
+import { ThreadMessageQueue } from "../Services/ThreadMessageQueue.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerSettingsService } from "../../serverSettings.ts";
 
@@ -72,7 +74,7 @@ async function waitFor(
 
 describe("ProviderCommandReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderCommandReactor,
+    OrchestrationEngineService | ProviderCommandReactor | ThreadMessageQueue,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -250,8 +252,12 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(RepositoryIdentityResolverLive),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const threadMessageQueueLayer = ThreadMessageQueueLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(threadMessageQueueLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(Layer.succeed(GitCore, { renameBranch } as unknown as GitCoreShape)),
       Layer.provideMerge(
@@ -277,6 +283,7 @@ describe("ProviderCommandReactor", () => {
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
+    const threadMessageQueue = await runtime.runPromise(Effect.service(ThreadMessageQueue));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
@@ -320,6 +327,7 @@ describe("ProviderCommandReactor", () => {
       refreshStatus,
       generateBranchName,
       generateThreadTitle,
+      threadMessageQueue,
       stateDir,
       drain,
     };
@@ -362,6 +370,75 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("dispatches the next queued message when the session becomes ready", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const queuedAt = "2000-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.threadMessageQueue.enqueue({
+        id: "queue-item-1",
+        threadId: ThreadId.make("thread-1"),
+        commandId: CommandId.make("cmd-queued-turn-start"),
+        messageId: asMessageId("user-message-queued"),
+        text: "queued follow-up",
+        attachments: [],
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+        },
+        titleSeed: "queued follow-up",
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        createdAt: queuedAt,
+        updatedAt: queuedAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-ready-for-queue"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      input: "queued follow-up",
+      interactionMode: "plan",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+      },
+    });
+
+    const snapshot = await Effect.runPromise(
+      harness.threadMessageQueue.snapshot(ThreadId.make("thread-1")),
+    );
+    expect(snapshot.items).toHaveLength(0);
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.runtimeMode).toBe("full-access");
+    expect(thread?.interactionMode).toBe("plan");
+    const queuedMessage = thread?.messages.find(
+      (entry) => entry.id === asMessageId("user-message-queued"),
+    );
+    expect(queuedMessage?.createdAt).not.toBe(queuedAt);
   });
 
   it("generates a thread title on the first turn", async () => {

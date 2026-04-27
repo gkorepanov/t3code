@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import { Cause, Duration, Effect, Equal, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
   type AuthAccessStreamEvent,
   AuthSessionId,
@@ -19,6 +19,7 @@ import {
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
   ServerVoiceTranscriptionError,
+  type ThreadMessageQueueItem,
   ThreadId,
   type TerminalEvent,
   WS_METHODS,
@@ -38,6 +39,7 @@ import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ThreadMessageQueue } from "./orchestration/Services/ThreadMessageQueue.ts";
 import {
   observeRpcEffect,
   observeRpcStream,
@@ -86,6 +88,57 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
     event.type === "thread.reverted" ||
     event.type === "thread.session-set"
   );
+}
+
+function buildQueuedMessageItem(input: {
+  readonly id: ThreadMessageQueueItem["id"];
+  readonly commandId: ThreadMessageQueueItem["commandId"];
+  readonly command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>;
+}): ThreadMessageQueueItem {
+  return {
+    id: input.id,
+    threadId: input.command.threadId,
+    commandId: input.commandId,
+    messageId: input.command.message.messageId,
+    text: input.command.message.text,
+    attachments: input.command.message.attachments,
+    ...(input.command.modelSelection !== undefined
+      ? { modelSelection: input.command.modelSelection }
+      : {}),
+    ...(input.command.titleSeed !== undefined ? { titleSeed: input.command.titleSeed } : {}),
+    runtimeMode: input.command.runtimeMode,
+    interactionMode: input.command.interactionMode,
+    ...(input.command.sourceProposedPlan !== undefined
+      ? { sourceProposedPlan: input.command.sourceProposedPlan }
+      : {}),
+    createdAt: input.command.createdAt,
+    updatedAt: input.command.createdAt,
+  };
+}
+
+function buildQueuedTurnStartCommand(
+  item: ThreadMessageQueueItem,
+  createdAt: string,
+): Extract<OrchestrationCommand, { type: "thread.turn.start" }> {
+  return {
+    type: "thread.turn.start",
+    commandId: item.commandId,
+    threadId: item.threadId,
+    message: {
+      messageId: item.messageId,
+      role: "user",
+      text: item.text,
+      attachments: item.attachments,
+    },
+    ...(item.modelSelection !== undefined ? { modelSelection: item.modelSelection } : {}),
+    ...(item.titleSeed !== undefined ? { titleSeed: item.titleSeed } : {}),
+    runtimeMode: item.runtimeMode,
+    interactionMode: item.interactionMode,
+    ...(item.sourceProposedPlan !== undefined
+      ? { sourceProposedPlan: item.sourceProposedPlan }
+      : {}),
+    createdAt,
+  };
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
@@ -152,6 +205,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
+      const threadMessageQueue = yield* ThreadMessageQueue;
       const serverAuth = yield* ServerAuth;
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const sessions = yield* SessionCredentialService;
@@ -511,6 +565,75 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           );
       };
 
+      const dispatchQueueSettingCommand = (command: OrchestrationCommand) =>
+        dispatchNormalizedCommand(command).pipe(Effect.asVoid);
+
+      const dispatchQueuedMessageNow = Effect.fn("dispatchQueuedMessageNow")(function* (input: {
+        readonly threadId: ThreadId;
+        readonly id: ThreadMessageQueueItem["id"];
+      }) {
+        const item = yield* threadMessageQueue.getById(input);
+        if (!item) {
+          return yield* new OrchestrationDispatchCommandError({
+            message: "Queued message was not found.",
+          });
+        }
+
+        const readModel = yield* orchestrationEngine
+          .getReadModel()
+          .pipe(
+            Effect.mapError((cause) =>
+              toDispatchCommandError(cause, "Failed to load thread for queued message"),
+            ),
+          );
+        const thread = readModel.threads.find((entry) => entry.id === input.threadId);
+        if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) {
+          return yield* new OrchestrationDispatchCommandError({
+            message: "Queued message thread is not active.",
+          });
+        }
+
+        const isSteeringRunningTurn = thread.session?.status === "running";
+        const dispatchedAt = new Date().toISOString();
+        if (
+          item.modelSelection !== undefined &&
+          !Equal.equals(thread.modelSelection, item.modelSelection)
+        ) {
+          yield* dispatchQueueSettingCommand({
+            type: "thread.meta.update",
+            commandId: serverCommandId("queued-message-model-selection"),
+            threadId: thread.id,
+            modelSelection: item.modelSelection,
+          });
+        }
+        if (!isSteeringRunningTurn && thread.runtimeMode !== item.runtimeMode) {
+          yield* dispatchQueueSettingCommand({
+            type: "thread.runtime-mode.set",
+            commandId: serverCommandId("queued-message-runtime-mode"),
+            threadId: thread.id,
+            runtimeMode: item.runtimeMode,
+            createdAt: dispatchedAt,
+          });
+        }
+        if (thread.interactionMode !== item.interactionMode) {
+          yield* dispatchQueueSettingCommand({
+            type: "thread.interaction-mode.set",
+            commandId: serverCommandId("queued-message-interaction-mode"),
+            threadId: thread.id,
+            interactionMode: item.interactionMode,
+            createdAt: dispatchedAt,
+          });
+        }
+
+        yield* dispatchNormalizedCommand(buildQueuedTurnStartCommand(item, dispatchedAt));
+        yield* threadMessageQueue.delete(input, { preserveAttachments: true });
+        return {
+          ...item,
+          createdAt: dispatchedAt,
+          updatedAt: dispatchedAt,
+        };
+      });
+
       const loadServerConfig = Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const providers = yield* providerRegistry.getProviders;
@@ -607,6 +730,95 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   ? cause
                   : new OrchestrationDispatchCommandError({
                       message: "Failed to dispatch orchestration command",
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.enqueueMessage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.enqueueMessage,
+            Effect.gen(function* () {
+              const normalizedCommand = yield* normalizeDispatchCommand({
+                type: "thread.turn.start",
+                commandId: input.commandId,
+                threadId: input.threadId,
+                message: input.message,
+                ...(input.modelSelection !== undefined
+                  ? { modelSelection: input.modelSelection }
+                  : {}),
+                ...(input.titleSeed !== undefined ? { titleSeed: input.titleSeed } : {}),
+                runtimeMode: input.runtimeMode,
+                interactionMode: input.interactionMode,
+                ...(input.sourceProposedPlan !== undefined
+                  ? { sourceProposedPlan: input.sourceProposedPlan }
+                  : {}),
+                createdAt: input.createdAt,
+              });
+              if (normalizedCommand.type !== "thread.turn.start") {
+                return yield* new OrchestrationDispatchCommandError({
+                  message: "Failed to normalize queued message.",
+                });
+              }
+              const item = buildQueuedMessageItem({
+                id: input.id,
+                commandId: input.commandId,
+                command: normalizedCommand,
+              });
+              return yield* threadMessageQueue.enqueue(item);
+            }).pipe(
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationDispatchCommandError)(cause)
+                  ? cause
+                  : new OrchestrationDispatchCommandError({
+                      message: "Failed to enqueue message",
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.updateQueuedMessage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.updateQueuedMessage,
+            threadMessageQueue.update(input).pipe(
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationDispatchCommandError)(cause)
+                  ? cause
+                  : new OrchestrationDispatchCommandError({
+                      message: "Failed to update queued message",
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.deleteQueuedMessage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.deleteQueuedMessage,
+            threadMessageQueue.delete(input).pipe(
+              Effect.as({}),
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationDispatchCommandError)(cause)
+                  ? cause
+                  : new OrchestrationDispatchCommandError({
+                      message: "Failed to delete queued message",
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.dispatchQueuedMessageNow]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.dispatchQueuedMessageNow,
+            dispatchQueuedMessageNow(input).pipe(
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationDispatchCommandError)(cause)
+                  ? cause
+                  : new OrchestrationDispatchCommandError({
+                      message: "Failed to dispatch queued message",
                       cause,
                     }),
               ),
@@ -745,6 +957,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 liveStream,
               );
             }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeThreadQueue]: (input) =>
+          observeRpcStream(
+            ORCHESTRATION_WS_METHODS.subscribeThreadQueue,
+            threadMessageQueue.streamThread(input).pipe(
+              Stream.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: `Failed to load queued messages for thread ${input.threadId}`,
+                    cause,
+                  }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.serverGetConfig]: (_input) =>

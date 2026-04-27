@@ -52,6 +52,13 @@ import type {
   OrchestrationShellStreamItem,
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
+  ThreadMessageQueueDeleteInput,
+  ThreadMessageQueueDispatchNowInput,
+  ThreadMessageQueueEnqueueInput,
+  ThreadMessageQueueItem,
+  ThreadMessageQueueStreamItem,
+  ThreadMessageQueueSubscribeInput,
+  ThreadMessageQueueUpdateInput,
 } from "./orchestration.ts";
 import type { EnvironmentId } from "./baseSchemas.ts";
 import { EditorId, type EditorOpenOptions } from "./editor.ts";
@@ -293,6 +300,12 @@ export interface EnvironmentApi {
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
+    enqueueMessage: (input: ThreadMessageQueueEnqueueInput) => Promise<ThreadMessageQueueItem>;
+    updateQueuedMessage: (input: ThreadMessageQueueUpdateInput) => Promise<ThreadMessageQueueItem>;
+    deleteQueuedMessage: (input: ThreadMessageQueueDeleteInput) => Promise<void>;
+    dispatchQueuedMessageNow: (
+      input: ThreadMessageQueueDispatchNowInput,
+    ) => Promise<ThreadMessageQueueItem>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
@@ -306,6 +319,13 @@ export interface EnvironmentApi {
     subscribeThread: (
       input: OrchestrationSubscribeThreadInput,
       callback: (event: OrchestrationThreadStreamItem) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+    subscribeThreadQueue: (
+      input: ThreadMessageQueueSubscribeInput,
+      callback: (event: ThreadMessageQueueStreamItem) => void,
       options?: {
         onResubscribe?: () => void;
       },

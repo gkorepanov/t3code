@@ -41,12 +41,20 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     orchestration: {
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
+      enqueueMessage: rpcClient.orchestration.enqueueMessage,
+      updateQueuedMessage: rpcClient.orchestration.updateQueuedMessage,
+      deleteQueuedMessage: async (input) => {
+        await rpcClient.orchestration.deleteQueuedMessage(input);
+      },
+      dispatchQueuedMessageNow: rpcClient.orchestration.dispatchQueuedMessageNow,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>
         rpcClient.orchestration.subscribeThread(input, callback, options),
+      subscribeThreadQueue: (input, callback, options) =>
+        rpcClient.orchestration.subscribeThreadQueue(input, callback, options),
     },
   };
 }

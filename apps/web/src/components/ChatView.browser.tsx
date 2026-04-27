@@ -211,6 +211,18 @@ function createMockEnvironmentApi(input: {
     },
     orchestration: {
       dispatchCommand: input.dispatchCommand,
+      enqueueMessage: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["enqueueMessage"],
+      updateQueuedMessage: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["updateQueuedMessage"],
+      deleteQueuedMessage: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["deleteQueuedMessage"],
+      dispatchQueuedMessageNow: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["dispatchQueuedMessageNow"],
       getTurnDiff: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getTurnDiff"],
@@ -220,6 +232,8 @@ function createMockEnvironmentApi(input: {
       subscribeShell: (() => () => undefined) as EnvironmentApi["orchestration"]["subscribeShell"],
       subscribeThread: (() => () =>
         undefined) as EnvironmentApi["orchestration"]["subscribeThread"],
+      subscribeThreadQueue: (() => () =>
+        undefined) as EnvironmentApi["orchestration"]["subscribeThreadQueue"],
     },
   };
 }

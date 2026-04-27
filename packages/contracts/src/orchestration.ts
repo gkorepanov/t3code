@@ -18,6 +18,11 @@ import {
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
+  enqueueMessage: "orchestration.messageQueue.enqueue",
+  updateQueuedMessage: "orchestration.messageQueue.update",
+  deleteQueuedMessage: "orchestration.messageQueue.delete",
+  dispatchQueuedMessageNow: "orchestration.messageQueue.dispatchNow",
+  subscribeThreadQueue: "orchestration.messageQueue.subscribeThread",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
@@ -318,6 +323,38 @@ export const OrchestrationThread = Schema.Struct({
   session: Schema.NullOr(OrchestrationSession),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
+
+export const ThreadMessageQueueItemId = TrimmedNonEmptyString;
+export type ThreadMessageQueueItemId = typeof ThreadMessageQueueItemId.Type;
+
+export const ThreadMessageQueueItem = Schema.Struct({
+  id: ThreadMessageQueueItemId,
+  threadId: ThreadId,
+  commandId: CommandId,
+  messageId: MessageId,
+  text: Schema.String,
+  attachments: Schema.Array(ChatAttachment),
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ThreadMessageQueueItem = typeof ThreadMessageQueueItem.Type;
+
+export const ThreadMessageQueueSnapshot = Schema.Struct({
+  threadId: ThreadId,
+  items: Schema.Array(ThreadMessageQueueItem),
+});
+export type ThreadMessageQueueSnapshot = typeof ThreadMessageQueueSnapshot.Type;
+
+export const ThreadMessageQueueStreamItem = Schema.Struct({
+  kind: Schema.Literal("snapshot"),
+  snapshot: ThreadMessageQueueSnapshot,
+});
+export type ThreadMessageQueueStreamItem = typeof ThreadMessageQueueStreamItem.Type;
 
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
@@ -1165,10 +1202,70 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const ThreadMessageQueueEnqueueInput = Schema.Struct({
+  id: ThreadMessageQueueItemId,
+  threadId: ThreadId,
+  commandId: CommandId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(UploadChatAttachment),
+  }),
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  createdAt: IsoDateTime,
+});
+export type ThreadMessageQueueEnqueueInput = typeof ThreadMessageQueueEnqueueInput.Type;
+
+export const ThreadMessageQueueUpdateInput = Schema.Struct({
+  threadId: ThreadId,
+  id: ThreadMessageQueueItemId,
+  text: Schema.String,
+  updatedAt: IsoDateTime,
+});
+export type ThreadMessageQueueUpdateInput = typeof ThreadMessageQueueUpdateInput.Type;
+
+export const ThreadMessageQueueDeleteInput = Schema.Struct({
+  threadId: ThreadId,
+  id: ThreadMessageQueueItemId,
+});
+export type ThreadMessageQueueDeleteInput = typeof ThreadMessageQueueDeleteInput.Type;
+
+export const ThreadMessageQueueDispatchNowInput = Schema.Struct({
+  threadId: ThreadId,
+  id: ThreadMessageQueueItemId,
+});
+export type ThreadMessageQueueDispatchNowInput = typeof ThreadMessageQueueDispatchNowInput.Type;
+
+export const ThreadMessageQueueSubscribeInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type ThreadMessageQueueSubscribeInput = typeof ThreadMessageQueueSubscribeInput.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  enqueueMessage: {
+    input: ThreadMessageQueueEnqueueInput,
+    output: ThreadMessageQueueItem,
+  },
+  updateQueuedMessage: {
+    input: ThreadMessageQueueUpdateInput,
+    output: ThreadMessageQueueItem,
+  },
+  deleteQueuedMessage: {
+    input: ThreadMessageQueueDeleteInput,
+    output: Schema.Struct({}),
+  },
+  dispatchQueuedMessageNow: {
+    input: ThreadMessageQueueDispatchNowInput,
+    output: ThreadMessageQueueItem,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,
@@ -1185,6 +1282,10 @@ export const OrchestrationRpcSchemas = {
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,
     output: OrchestrationThreadStreamItem,
+  },
+  subscribeThreadQueue: {
+    input: ThreadMessageQueueSubscribeInput,
+    output: ThreadMessageQueueStreamItem,
   },
   subscribeShell: {
     input: Schema.Struct({}),
