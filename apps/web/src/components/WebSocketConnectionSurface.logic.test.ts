@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { WsConnectionStatus } from "../rpc/wsConnectionState";
-import { shouldAutoReconnect, shouldRestartStalledReconnect } from "./WebSocketConnectionSurface";
+import {
+  shouldAutoReconnect,
+  shouldForceReconnectOnForeground,
+  shouldRestartStalledReconnect,
+} from "./WebSocketConnectionSurface";
 
 function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionStatus {
   return {
@@ -79,6 +83,32 @@ describe("WebSocketConnectionSurface.logic", () => {
         "focus",
       ),
     ).toBe(true);
+  });
+
+  it("forces reconnect when the page returns from background with a stale connected socket", () => {
+    expect(
+      shouldForceReconnectOnForeground(
+        makeStatus({
+          connectedAt: "2026-04-03T20:00:00.000Z",
+          hasConnected: true,
+          online: true,
+          phase: "connected",
+        }),
+        true,
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldForceReconnectOnForeground(
+        makeStatus({
+          connectedAt: "2026-04-03T20:00:00.000Z",
+          hasConnected: true,
+          online: true,
+          phase: "connected",
+        }),
+        false,
+      ),
+    ).toBe(false);
   });
 
   it("restarts a stalled reconnect window after the scheduled retry time passes", () => {

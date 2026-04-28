@@ -125,6 +125,13 @@ export function shouldAutoReconnect(
   );
 }
 
+export function shouldForceReconnectOnForeground(
+  status: WsConnectionStatus,
+  wasHidden: boolean,
+): boolean {
+  return wasHidden && status.online && status.hasConnected;
+}
+
 export function shouldRestartStalledReconnect(
   status: WsConnectionStatus,
   expectedNextRetryAt: string,
@@ -145,6 +152,7 @@ export function WebSocketConnectionCoordinator() {
   const toastResetTimerRef = useRef<number | null>(null);
   const previousUiStateRef = useRef<WsConnectionUiState>(getWsConnectionUiState(status));
   const previousDisconnectedAtRef = useRef<string | null>(status.disconnectedAt);
+  const wasDocumentHiddenRef = useRef(false);
 
   const runReconnect = useEffectEvent((showFailureToast: boolean) => {
     if (toastResetTimerRef.current !== null) {
@@ -192,6 +200,18 @@ export function WebSocketConnectionCoordinator() {
 
     runReconnect(false);
   });
+  const triggerForegroundReconnect = useEffectEvent(() => {
+    const currentStatus = getWsConnectionStatus();
+    if (!shouldForceReconnectOnForeground(currentStatus, wasDocumentHiddenRef.current)) {
+      return;
+    }
+    if (Date.now() - lastForcedReconnectAtRef.current < FORCED_WS_RECONNECT_DEBOUNCE_MS) {
+      return;
+    }
+
+    wasDocumentHiddenRef.current = false;
+    runReconnect(false);
+  });
 
   useEffect(() => {
     const handleOnline = () => {
@@ -200,15 +220,44 @@ export function WebSocketConnectionCoordinator() {
     const handleFocus = () => {
       triggerAutoReconnect("focus");
     };
+    const handlePageHide = () => {
+      wasDocumentHiddenRef.current = true;
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted && !wasDocumentHiddenRef.current) {
+        return;
+      }
+
+      syncBrowserOnlineStatus();
+      triggerForegroundReconnect();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        wasDocumentHiddenRef.current = true;
+        return;
+      }
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      syncBrowserOnlineStatus();
+      triggerForegroundReconnect();
+    };
 
     syncBrowserOnlineStatus();
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", syncBrowserOnlineStatus);
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", syncBrowserOnlineStatus);
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
