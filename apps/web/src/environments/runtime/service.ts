@@ -2,6 +2,7 @@ import {
   type AuthSessionRole,
   type EnvironmentId,
   type OrchestrationEvent,
+  type OrchestrationEventDeltaStreamItem,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
   type PersistedSavedEnvironmentRecord,
@@ -29,7 +30,7 @@ import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { projectQueryKeys } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
-import { getPrimaryKnownEnvironment, resolvePrimaryEnvironmentHttpUrl } from "../primary";
+import { getPrimaryKnownEnvironment } from "../primary";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
@@ -95,6 +96,7 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
     readonly updatedAt: string | null;
   }
 >();
+const pendingDeltaReplayByEnvironment = new Set<EnvironmentId>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -202,6 +204,32 @@ function markAppliedProjectionEvent(environmentId: EnvironmentId, sequence: numb
   });
 }
 
+function readAppliedSequence(environmentId: EnvironmentId): number | null {
+  return readLastAppliedProjectionVersion(environmentId)?.sequence ?? null;
+}
+
+function requestDeltaReplay(environmentId: EnvironmentId): void {
+  if (pendingDeltaReplayByEnvironment.has(environmentId)) {
+    return;
+  }
+
+  pendingDeltaReplayByEnvironment.add(environmentId);
+  queueMicrotask(() => {
+    const connection = readEnvironmentConnection(environmentId);
+    if (!connection) {
+      pendingDeltaReplayByEnvironment.delete(environmentId);
+      return;
+    }
+
+    void connection
+      .reconnect()
+      .catch(() => undefined)
+      .finally(() => {
+        pendingDeltaReplayByEnvironment.delete(environmentId);
+      });
+  });
+}
+
 function getThreadDetailSubscriptionKey(environmentId: EnvironmentId, threadId: ThreadId): string {
   return scopedThreadKey(scopeThreadRef(environmentId, threadId));
 }
@@ -284,9 +312,7 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
     (item) => {
       if (item.kind === "snapshot") {
         useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
-        return;
       }
-      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
     },
   );
   return true;
@@ -490,18 +516,6 @@ function getRuntimeErrorFields(error: unknown) {
 
 function isoNow(): string {
   return new Date().toISOString();
-}
-
-async function fetchOrchestrationShellSnapshot(
-  url: string,
-  bearerToken?: string,
-): Promise<OrchestrationShellSnapshot> {
-  const response = await fetch(url, {
-    credentials: "include",
-    headers: bearerToken ? { authorization: `Bearer ${bearerToken}` } : {},
-  });
-  if (!response.ok) throw new Error(`Failed to load orchestration snapshot (${response.status}).`);
-  return (await response.json()) as OrchestrationShellSnapshot;
 }
 
 function setRuntimeConnecting(environmentId: EnvironmentId) {
@@ -711,16 +725,10 @@ export function applyEnvironmentThreadDetailEvent(
   applyRecoveredEventBatch([event], environmentId);
 }
 
-function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) {
-  if (
-    !shouldApplyProjectionEvent({
-      current: readLastAppliedProjectionVersion(environmentId),
-      sequence: event.sequence,
-    })
-  ) {
-    return;
-  }
-
+function applyShellProjectionEvent(
+  event: OrchestrationShellStreamEvent,
+  environmentId: EnvironmentId,
+) {
   const threadId =
     event.kind === "thread-upserted"
       ? event.thread.id
@@ -731,7 +739,6 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   const previousThread = threadRef ? selectThreadByRef(useStore.getState(), threadRef) : undefined;
 
   useStore.getState().applyShellEvent(event, environmentId);
-  markAppliedProjectionEvent(environmentId, event.sequence);
 
   switch (event.kind) {
     case "project-upserted":
@@ -761,9 +768,63 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   }
 }
 
+function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) {
+  if (
+    !shouldApplyProjectionEvent({
+      current: readLastAppliedProjectionVersion(environmentId),
+      sequence: event.sequence,
+    })
+  ) {
+    return;
+  }
+
+  applyShellProjectionEvent(event, environmentId);
+  markAppliedProjectionEvent(environmentId, event.sequence);
+}
+
+function applyDeltaEvent(
+  item: Extract<OrchestrationEventDeltaStreamItem, { kind: "event" }>,
+  environmentId: EnvironmentId,
+) {
+  const currentSequence = readAppliedSequence(environmentId);
+  if (currentSequence !== null && item.event.sequence <= currentSequence) {
+    return;
+  }
+  if (
+    (currentSequence !== null && item.event.sequence !== currentSequence + 1) ||
+    (currentSequence === null && item.event.sequence !== 1)
+  ) {
+    requestDeltaReplay(environmentId);
+    return;
+  }
+
+  applyRecoveredEventBatch([item.event], environmentId);
+  if (item.shellEvent) {
+    applyShellProjectionEvent(item.shellEvent, environmentId);
+  }
+  markAppliedProjectionEvent(environmentId, item.event.sequence);
+}
+
+function markCaughtUp(sequence: number, environmentId: EnvironmentId): boolean {
+  const currentSequence = readAppliedSequence(environmentId);
+  if (currentSequence !== null && sequence <= currentSequence) {
+    return true;
+  }
+  if (currentSequence === null && sequence === 0) {
+    markAppliedProjectionEvent(environmentId, sequence);
+    return true;
+  }
+
+  requestDeltaReplay(environmentId);
+  return false;
+}
+
 function createEnvironmentConnectionHandlers() {
   return {
     applyShellEvent,
+    applyDeltaEvent,
+    markCaughtUp,
+    readAppliedSequence,
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
       if (
         !shouldApplyProjectionSnapshot({
@@ -925,10 +986,6 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
-      loadSnapshot: () =>
-        fetchOrchestrationShellSnapshot(
-          resolvePrimaryEnvironmentHttpUrl("/api/orchestration/shell-snapshot"),
-        ),
       ...createEnvironmentConnectionHandlers(),
     }),
   );
@@ -978,11 +1035,6 @@ async function ensureSavedEnvironmentConnection(
       environmentId: record.environmentId,
     },
     client,
-    loadSnapshot: () =>
-      fetchOrchestrationShellSnapshot(
-        new URL("/api/orchestration/shell-snapshot", record.httpBaseUrl).toString(),
-        bearerToken,
-      ),
     refreshMetadata: async () => {
       await refreshSavedEnvironmentMetadata(record, bearerToken, client);
     },
@@ -1262,6 +1314,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
 export async function resetEnvironmentServiceForTests(): Promise<void> {
   stopActiveService();
   lastAppliedProjectionVersionByEnvironment.clear();
+  pendingDeltaReplayByEnvironment.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);
   }

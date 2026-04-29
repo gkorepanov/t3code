@@ -26,6 +26,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
+  subscribeEvents: "orchestration.subscribeEvents",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
 } as const;
@@ -1112,6 +1113,28 @@ export const OrchestrationThreadStreamItem = Schema.Union([
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
 
+export const OrchestrationSubscribeEventsInput = Schema.Struct({
+  fromSequenceExclusive: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationSubscribeEventsInput = typeof OrchestrationSubscribeEventsInput.Type;
+
+export const OrchestrationEventDeltaStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: OrchestrationShellSnapshot,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("event"),
+    event: OrchestrationEvent,
+    shellEvent: Schema.optional(OrchestrationShellStreamEvent),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("caught-up"),
+    sequence: NonNegativeInt,
+  }),
+]);
+export type OrchestrationEventDeltaStreamItem = typeof OrchestrationEventDeltaStreamItem.Type;
+
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
 
@@ -1278,6 +1301,10 @@ export const OrchestrationRpcSchemas = {
   replayEvents: {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
+  },
+  subscribeEvents: {
+    input: OrchestrationSubscribeEventsInput,
+    output: OrchestrationEventDeltaStreamItem,
   },
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,

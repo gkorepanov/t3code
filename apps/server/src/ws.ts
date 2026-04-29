@@ -9,6 +9,7 @@ import {
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
+  type OrchestrationEventDeltaStreamItem,
   type OrchestrationShellStreamEvent,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
@@ -37,7 +38,10 @@ import { GitStatusBroadcaster } from "./git/Services/GitStatusBroadcaster.ts";
 import { Keybindings } from "./keybindings.ts";
 import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
-import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
+import {
+  OrchestrationEngineService,
+  type OrchestrationEventReplayStreamItem,
+} from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadMessageQueue } from "./orchestration/Services/ThreadMessageQueue.ts";
 import {
@@ -67,6 +71,11 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+
+type OrchestrationDeltaStream = Stream.Stream<
+  OrchestrationEventDeltaStreamItem,
+  OrchestrationGetSnapshotError
+>;
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -304,6 +313,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const enrichOrchestrationEvents = (events: ReadonlyArray<OrchestrationEvent>) =>
         Effect.forEach(events, enrichProjectEvent, { concurrency: 4 });
 
+      const MAX_DELTA_REPLAY_EVENT_COUNT = 5_000;
+
       const toShellStreamEvent = (
         event: OrchestrationEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
@@ -354,6 +365,100 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               );
         }
       };
+
+      const toDeltaStreamItem = (
+        item: OrchestrationEventReplayStreamItem,
+      ): Effect.Effect<OrchestrationEventDeltaStreamItem> => {
+        if (item.kind === "caught-up") {
+          return Effect.succeed({
+            kind: "caught-up" as const,
+            sequence: item.sequence,
+          });
+        }
+
+        return toShellStreamEvent(item.event).pipe(
+          Effect.map((shellEvent) => ({
+            kind: "event" as const,
+            event: item.event,
+            ...(Option.isSome(shellEvent) ? { shellEvent: shellEvent.value } : {}),
+          })),
+        );
+      };
+
+      const loadShellSnapshot = () =>
+        projectionSnapshotQuery.getShellSnapshot().pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationGetSnapshotError({
+                message: "Failed to load orchestration shell snapshot",
+                cause,
+              }),
+          ),
+        );
+
+      const mapReplayError = (cause: unknown) =>
+        new OrchestrationGetSnapshotError({
+          message: "Failed to replay orchestration events",
+          cause,
+        });
+
+      const streamDeltaEventsFrom = (
+        fromSequenceExclusive: number,
+        options?: { readonly fallbackToSnapshotOnFailure?: boolean },
+      ): OrchestrationDeltaStream => {
+        const stream = orchestrationEngine
+          .streamEventsFrom(
+            clamp(fromSequenceExclusive, {
+              maximum: Number.MAX_SAFE_INTEGER,
+              minimum: 0,
+            }),
+          )
+          .pipe(Stream.mapEffect(toDeltaStreamItem));
+
+        if (options?.fallbackToSnapshotOnFailure) {
+          return stream.pipe(
+            Stream.catchCause(
+              (cause): OrchestrationDeltaStream =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Stream.fail(mapReplayError(Cause.squash(cause)))
+                  : Stream.unwrap(streamSnapshotThenDeltas()),
+            ),
+          );
+        }
+
+        return stream.pipe(Stream.mapError(mapReplayError));
+      };
+
+      const streamSnapshotThenDeltas = (): Effect.Effect<
+        OrchestrationDeltaStream,
+        OrchestrationGetSnapshotError
+      > =>
+        Effect.gen(function* () {
+          const snapshot = yield* loadShellSnapshot();
+          return Stream.concat(
+            Stream.make({
+              kind: "snapshot" as const,
+              snapshot,
+            }),
+            streamDeltaEventsFrom(snapshot.snapshotSequence),
+          );
+        });
+
+      const streamDeltaEventsOrSnapshotFrom = (
+        fromSequenceExclusive: number,
+      ): Effect.Effect<OrchestrationDeltaStream, OrchestrationGetSnapshotError> =>
+        Effect.gen(function* () {
+          const fromSequence = clamp(fromSequenceExclusive, {
+            maximum: Number.MAX_SAFE_INTEGER,
+            minimum: 0,
+          });
+          const readModel = yield* orchestrationEngine.getReadModel();
+          if (readModel.snapshotSequence - fromSequence > MAX_DELTA_REPLAY_EVENT_COUNT) {
+            return yield* streamSnapshotThenDeltas();
+          }
+
+          return streamDeltaEventsFrom(fromSequence, { fallbackToSnapshotOnFailure: true });
+        });
 
       const dispatchBootstrapTurnStart = (
         command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
@@ -874,6 +979,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeEvents]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeEvents,
+            Effect.gen(function* () {
+              if (input.fromSequenceExclusive !== undefined) {
+                return yield* streamDeltaEventsOrSnapshotFrom(input.fromSequenceExclusive);
+              }
+
+              return yield* streamSnapshotThenDeltas();
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>

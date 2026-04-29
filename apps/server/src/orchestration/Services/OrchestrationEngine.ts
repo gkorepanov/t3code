@@ -21,6 +21,16 @@ import type { Effect, Stream } from "effect";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
 
+export type OrchestrationEventReplayStreamItem =
+  | {
+      readonly kind: "event";
+      readonly event: OrchestrationEvent;
+    }
+  | {
+      readonly kind: "caught-up";
+      readonly sequence: number;
+    };
+
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
@@ -41,6 +51,17 @@ export interface OrchestrationEngineShape {
   readonly readEvents: (
     fromSequenceExclusive: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
+
+  /**
+   * Replay persisted events from a cursor, then continue with live events.
+   *
+   * The live subscription is acquired before reading the in-memory watermark,
+   * so events committed while replay is running are either included in replay
+   * or delivered through the live tail.
+   */
+  readonly streamEventsFrom: (
+    fromSequenceExclusive: number,
+  ) => Stream.Stream<OrchestrationEventReplayStreamItem, OrchestrationEventStoreError, never>;
 
   /**
    * Dispatch a validated orchestration command.

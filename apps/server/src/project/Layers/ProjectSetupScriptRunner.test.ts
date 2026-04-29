@@ -44,6 +44,7 @@ describe("ProjectSetupScriptRunner", () => {
               Layer.succeed(OrchestrationEngineService, {
                 getReadModel: () => Effect.succeed(emptySnapshot([])),
                 readEvents: () => Stream.empty,
+                streamEventsFrom: () => Stream.empty,
                 dispatch: () => Effect.die(new Error("unused")),
                 streamDomainEvents: Stream.empty,
               }),
@@ -112,6 +113,7 @@ describe("ProjectSetupScriptRunner", () => {
                     ]),
                   ),
                 readEvents: () => Stream.empty,
+                streamEventsFrom: () => Stream.empty,
                 dispatch: () => Effect.die(new Error("unused")),
                 streamDomainEvents: Stream.empty,
               }),

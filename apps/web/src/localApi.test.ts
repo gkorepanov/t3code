@@ -5,6 +5,7 @@ import {
   EnvironmentId,
   type GitStatusResult,
   ProjectId,
+  type OrchestrationEventDeltaStreamItem,
   type OrchestrationShellStreamItem,
   type ServerConfig,
   type ServerProvider,
@@ -32,6 +33,7 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
 }
 
 const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
+const orchestrationEventListeners = new Set<(event: OrchestrationEventDeltaStreamItem) => void>();
 const shellStreamListeners = new Set<(event: OrchestrationShellStreamItem) => void>();
 const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
 const persistedClientSettings = {
@@ -98,6 +100,9 @@ const rpcClientMock = {
     dispatchCommand: vi.fn(),
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
+    subscribeEvents: vi.fn((listener: (event: OrchestrationEventDeltaStreamItem) => void) =>
+      registerListener(orchestrationEventListeners, listener),
+    ),
     subscribeShell: vi.fn((listener: (event: OrchestrationShellStreamItem) => void) =>
       registerListener(shellStreamListeners, listener),
     ),
@@ -302,6 +307,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   showContextMenuFallbackMock.mockReset();
   terminalEventListeners.clear();
+  orchestrationEventListeners.clear();
   shellStreamListeners.clear();
   gitStatusListeners.clear();
   const testWindow = getWindowForTest();
@@ -406,6 +412,22 @@ describe("wsApi", () => {
     api.orchestration.subscribeShell(onShellEvent, { onResubscribe });
 
     expect(rpcClientMock.orchestration.subscribeShell).toHaveBeenCalledWith(onShellEvent, {
+      onResubscribe,
+    });
+  });
+
+  it("forwards orchestration event stream options to the RPC client", async () => {
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+    const onEvent = vi.fn();
+    const onResubscribe = vi.fn();
+    const fromSequenceExclusive = vi.fn(() => 3);
+
+    api.orchestration.subscribeEvents(onEvent, { fromSequenceExclusive, onResubscribe });
+
+    expect(rpcClientMock.orchestration.subscribeEvents).toHaveBeenCalledWith(onEvent, {
+      fromSequenceExclusive,
       onResubscribe,
     });
   });

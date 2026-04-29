@@ -370,6 +370,62 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  it("streams replay events from a sequence cursor before caught-up", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const createdAt = now();
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-project-replay-stream-create"),
+        projectId: asProjectId("project-replay-stream"),
+        title: "Replay Stream Project",
+        workspaceRoot: "/tmp/project-replay-stream",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-thread-replay-stream-create"),
+        threadId: ThreadId.make("thread-replay-stream"),
+        projectId: asProjectId("project-replay-stream"),
+        title: "replay-stream",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    const items = await system.run(
+      Stream.runCollect(engine.streamEventsFrom(1).pipe(Stream.take(2))).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+
+    expect(items.map((item) => item.kind)).toEqual(["event", "caught-up"]);
+    expect(items[0]).toMatchObject({
+      kind: "event",
+      event: {
+        sequence: 2,
+        type: "thread.created",
+      },
+    });
+    expect(items[1]).toEqual({ kind: "caught-up", sequence: 2 });
+    await system.dispose();
+  });
+
   it("streams persisted domain events in order", async () => {
     const system = await createOrchestrationSystem();
     const { engine } = system;

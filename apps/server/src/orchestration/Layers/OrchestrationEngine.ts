@@ -284,6 +284,27 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive) =>
     eventStore.readFromSequence(fromSequenceExclusive);
 
+  const streamEventsFrom: OrchestrationEngineShape["streamEventsFrom"] = (fromSequenceExclusive) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const subscription = yield* PubSub.subscribe(eventPubSub);
+        const watermark = readModel.snapshotSequence;
+        const replay = eventStore
+          .readFromSequence(fromSequenceExclusive, Number.MAX_SAFE_INTEGER)
+          .pipe(
+            Stream.filter((event) => event.sequence <= watermark),
+            Stream.map((event) => ({ kind: "event" as const, event })),
+          );
+        const caughtUp = Stream.make({ kind: "caught-up" as const, sequence: watermark });
+        const live = Stream.fromSubscription(subscription).pipe(
+          Stream.filter((event) => event.sequence > watermark),
+          Stream.map((event) => ({ kind: "event" as const, event })),
+        );
+
+        return Stream.concat(Stream.concat(replay, caughtUp), live);
+      }),
+    );
+
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
@@ -294,6 +315,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   return {
     getReadModel,
     readEvents,
+    streamEventsFrom,
     dispatch,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)

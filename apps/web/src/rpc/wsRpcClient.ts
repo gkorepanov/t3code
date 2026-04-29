@@ -24,6 +24,7 @@ type RpcInput<TTag extends RpcTag> = Parameters<RpcMethod<TTag>>[0];
 
 interface StreamSubscriptionOptions {
   readonly onResubscribe?: () => void;
+  readonly fromSequenceExclusive?: () => number | null | undefined;
 }
 
 type RpcUnaryMethod<TTag extends RpcTag> =
@@ -133,6 +134,7 @@ export interface WsRpcClient {
     >;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
+    readonly subscribeEvents: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeEvents>;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
     readonly subscribeThreadQueue: RpcInputStreamMethod<
@@ -271,6 +273,19 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
+      subscribeEvents: (listener, options) =>
+        transport.subscribe(
+          (client) => {
+            const fromSequenceExclusive = options?.fromSequenceExclusive?.();
+            return client[ORCHESTRATION_WS_METHODS.subscribeEvents](
+              fromSequenceExclusive === undefined || fromSequenceExclusive === null
+                ? {}
+                : { fromSequenceExclusive },
+            );
+          },
+          listener,
+          options,
+        ),
       subscribeShell: (listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),

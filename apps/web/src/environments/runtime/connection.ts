@@ -1,7 +1,7 @@
 import type {
   EnvironmentId,
+  OrchestrationEventDeltaStreamItem,
   OrchestrationShellSnapshot,
-  OrchestrationShellStreamEvent,
   ServerConfig,
   ServerLifecycleWelcomePayload,
   TerminalEvent,
@@ -21,14 +21,16 @@ export interface EnvironmentConnection {
 }
 
 interface OrchestrationHandlers {
-  readonly applyShellEvent: (
-    event: OrchestrationShellStreamEvent,
+  readonly applyDeltaEvent: (
+    item: Extract<OrchestrationEventDeltaStreamItem, { kind: "event" }>,
     environmentId: EnvironmentId,
   ) => void;
   readonly syncShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
   ) => void;
+  readonly markCaughtUp: (sequence: number, environmentId: EnvironmentId) => boolean;
+  readonly readAppliedSequence: (environmentId: EnvironmentId) => number | null;
   readonly applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => void;
 }
 
@@ -36,24 +38,32 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly kind: "primary" | "saved";
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
-  readonly loadSnapshot?: () => Promise<OrchestrationShellSnapshot>;
   readonly refreshMetadata?: () => Promise<void>;
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
 }
 
 function createBootstrapGate() {
-  let resolve: (() => void) | null = null;
+  type BootstrapGateStatus = "ready" | "reset";
+
+  let resolve: ((status: BootstrapGateStatus) => void) | null = null;
   let reject: ((error: unknown) => void) | null = null;
-  let promise = new Promise<void>((nextResolve, nextReject) => {
+  let promise = new Promise<BootstrapGateStatus>((nextResolve, nextReject) => {
     resolve = nextResolve;
     reject = nextReject;
   });
 
   return {
-    wait: () => promise,
+    wait: async () => {
+      for (;;) {
+        const status = await promise;
+        if (status === "ready") {
+          return;
+        }
+      }
+    },
     resolve: () => {
-      resolve?.();
+      resolve?.("ready");
       resolve = null;
       reject = null;
     },
@@ -63,7 +73,8 @@ function createBootstrapGate() {
       reject = null;
     },
     reset: () => {
-      promise = new Promise<void>((nextResolve, nextReject) => {
+      resolve?.("reset");
+      promise = new Promise<BootstrapGateStatus>((nextResolve, nextReject) => {
         resolve = nextResolve;
         reject = nextReject;
       });
@@ -84,8 +95,6 @@ export function createEnvironmentConnection(
 
   let disposed = false;
   const bootstrapGate = createBootstrapGate();
-  let bootstrapGeneration = 0;
-  let bootstrapSnapshotLoadPromise: Promise<void> | null = null;
 
   const observeEnvironmentIdentity = (nextEnvironmentId: EnvironmentId, source: string) => {
     if (environmentId !== nextEnvironmentId) {
@@ -95,33 +104,8 @@ export function createEnvironmentConnection(
     }
   };
 
-  const startBootstrapSnapshotLoad = () => {
-    if (!input.loadSnapshot || bootstrapSnapshotLoadPromise) {
-      return;
-    }
-    const generation = bootstrapGeneration;
-    bootstrapSnapshotLoadPromise = input
-      .loadSnapshot()
-      .then((snapshot) => {
-        if (disposed || generation !== bootstrapGeneration) {
-          return;
-        }
-        input.syncShellSnapshot(snapshot, environmentId);
-        bootstrapGate.resolve();
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (generation === bootstrapGeneration) {
-          bootstrapSnapshotLoadPromise = null;
-        }
-      });
-  };
-
   const resetBootstrap = () => {
-    bootstrapGeneration += 1;
-    bootstrapSnapshotLoadPromise = null;
     bootstrapGate.reset();
-    startBootstrapSnapshotLoad();
   };
 
   const unsubLifecycle = input.client.server.subscribeLifecycle(
@@ -147,16 +131,23 @@ export function createEnvironmentConnection(
     },
   );
 
-  const unsubShell = input.client.orchestration.subscribeShell(
-    (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeShell"]>[0]>[0]) => {
+  const unsubEvents = input.client.orchestration.subscribeEvents(
+    (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeEvents"]>[0]>[0]) => {
       if (item.kind === "snapshot") {
         input.syncShellSnapshot(item.snapshot, environmentId);
         bootstrapGate.resolve();
         return;
       }
-      input.applyShellEvent(item, environmentId);
+      if (item.kind === "caught-up") {
+        if (input.markCaughtUp(item.sequence, environmentId)) {
+          bootstrapGate.resolve();
+        }
+        return;
+      }
+      input.applyDeltaEvent(item, environmentId);
     },
     {
+      fromSequenceExclusive: () => input.readAppliedSequence(environmentId),
       onResubscribe: () => {
         if (disposed) {
           return;
@@ -174,29 +165,23 @@ export function createEnvironmentConnection(
 
   const cleanup = () => {
     disposed = true;
-    unsubShell();
+    unsubEvents();
     unsubTerminalEvent();
     unsubLifecycle();
     unsubConfig();
   };
-
-  startBootstrapSnapshotLoad();
 
   return {
     kind: input.kind,
     environmentId,
     knownEnvironment: input.knownEnvironment,
     client: input.client,
-    ensureBootstrapped: () => {
-      startBootstrapSnapshotLoad();
-      return bootstrapGate.wait();
-    },
+    ensureBootstrapped: () => bootstrapGate.wait(),
     reconnect: async () => {
       resetBootstrap();
       try {
         await input.client.reconnect();
         await input.refreshMetadata?.();
-        startBootstrapSnapshotLoad();
         await bootstrapGate.wait();
       } catch (error) {
         bootstrapGate.reject(error);

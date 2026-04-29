@@ -49,6 +49,7 @@ import type {
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
+  OrchestrationEventDeltaStreamItem,
   OrchestrationShellStreamItem,
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
@@ -313,6 +314,13 @@ export interface EnvironmentApi {
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,
       options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+    subscribeEvents: (
+      callback: (event: OrchestrationEventDeltaStreamItem) => void,
+      options?: {
+        fromSequenceExclusive?: () => number | null | undefined;
         onResubscribe?: () => void;
       },
     ) => () => void;

@@ -356,6 +356,16 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   error: OrchestrationReplayEventsError,
 });
 
+export const WsOrchestrationSubscribeEventsRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.subscribeEvents,
+  {
+    payload: OrchestrationRpcSchemas.subscribeEvents.input,
+    success: OrchestrationRpcSchemas.subscribeEvents.output,
+    error: OrchestrationGetSnapshotError,
+    stream: true,
+  },
+);
+
 export const WsOrchestrationSubscribeShellRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subscribeShell, {
   payload: OrchestrationRpcSchemas.subscribeShell.input,
   success: OrchestrationRpcSchemas.subscribeShell.output,
@@ -449,6 +459,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
+  WsOrchestrationSubscribeEventsRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
   WsOrchestrationSubscribeThreadQueueRpc,

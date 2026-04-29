@@ -147,6 +147,7 @@ describe("ProviderSessionReaper", () => {
     const orchestrationEngine: OrchestrationEngineShape = {
       getReadModel: () => Effect.succeed(input.readModel),
       readEvents: () => Stream.empty,
+      streamEventsFrom: () => Stream.empty,
       dispatch: () => unsupported(),
       streamDomainEvents: Stream.empty,
     };
