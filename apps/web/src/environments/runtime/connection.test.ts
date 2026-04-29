@@ -9,6 +9,7 @@ function createTestClient() {
   const configListeners = new Set<(event: any) => void>();
   const terminalListeners = new Set<(event: any) => void>();
   const eventListeners = new Set<(event: any) => void>();
+  const eventSubscribeCursors: Array<number | null> = [];
   let eventsResubscribe: (() => void) | undefined;
 
   const client = {
@@ -41,8 +42,15 @@ function createTestClient() {
       getTurnDiff: vi.fn(async () => undefined),
       getFullThreadDiff: vi.fn(async () => undefined),
       subscribeEvents: vi.fn(
-        (listener: (event: any) => void, options?: { onResubscribe?: () => void }) => {
+        (
+          listener: (event: any) => void,
+          options?: {
+            fromSequenceExclusive?: () => number | null;
+            onResubscribe?: () => void;
+          },
+        ) => {
           eventListeners.add(listener);
+          eventSubscribeCursors.push(options?.fromSequenceExclusive?.() ?? null);
           eventsResubscribe = options?.onResubscribe;
           queueMicrotask(() => {
             listener({
@@ -103,6 +111,7 @@ function createTestClient() {
 
   return {
     client,
+    eventSubscribeCursors,
     emitWelcome: (environmentId: EnvironmentId) => {
       for (const listener of lifecycleListeners) {
         listener({
@@ -229,6 +238,41 @@ describe("createEnvironmentConnection", () => {
     expect(() => emitWelcome(EnvironmentId.make("env-2"))).toThrow(
       "Environment connection env-1 changed identity to env-2 via server lifecycle welcome.",
     );
+
+    await connection.dispose();
+  });
+
+  it("hydrates cached state before subscribing to event replay", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, eventSubscribeCursors } = createTestClient();
+    let appliedSequence: number | null = null;
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyDeltaEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      markCaughtUp: vi.fn(() => true),
+      readAppliedSequence: vi.fn(() => appliedSequence),
+      hydrateCachedState: vi.fn(async () => {
+        appliedSequence = 7;
+      }),
+      applyTerminalEvent: vi.fn(),
+    });
+
+    await connection.ensureBootstrapped();
+
+    expect(eventSubscribeCursors).toEqual([7]);
 
     await connection.dispose();
   });

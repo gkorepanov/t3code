@@ -68,6 +68,13 @@ import {
   derivePhysicalProjectKey,
 } from "../../logicalProject";
 import { getClientSettings } from "~/hooks/useSettings";
+import {
+  clearCachedThreadDetailsForEnvironment,
+  deleteCachedThreadDetail,
+  persistCachedAppliedState,
+  readCachedEnvironmentState,
+  touchCachedThreadDetail,
+} from "./orchestrationStateCache";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -96,6 +103,8 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
     readonly updatedAt: string | null;
   }
 >();
+const cachedShellSnapshotByEnvironment = new Map<EnvironmentId, OrchestrationShellSnapshot>();
+const threadDetailVersionByKey = new Map<string, number>();
 const pendingDeltaReplayByEnvironment = new Set<EnvironmentId>();
 
 let activeService: EnvironmentServiceState | null = null;
@@ -234,6 +243,137 @@ function getThreadDetailSubscriptionKey(environmentId: EnvironmentId, threadId: 
   return scopedThreadKey(scopeThreadRef(environmentId, threadId));
 }
 
+function readThreadDetailVersion(environmentId: EnvironmentId, threadId: ThreadId): number | null {
+  return (
+    threadDetailVersionByKey.get(getThreadDetailSubscriptionKey(environmentId, threadId)) ?? null
+  );
+}
+
+function markThreadDetailVersion(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  sequence: number,
+): void {
+  const key = getThreadDetailSubscriptionKey(environmentId, threadId);
+  const currentSequence = threadDetailVersionByKey.get(key);
+  if (currentSequence !== undefined && sequence <= currentSequence) {
+    return;
+  }
+  threadDetailVersionByKey.set(key, sequence);
+}
+
+function clearThreadDetailVersion(environmentId: EnvironmentId, threadId: ThreadId): void {
+  threadDetailVersionByKey.delete(getThreadDetailSubscriptionKey(environmentId, threadId));
+}
+
+function clearThreadDetailVersionsForEnvironment(environmentId: EnvironmentId): void {
+  for (const key of threadDetailVersionByKey.keys()) {
+    if (key.startsWith(`${environmentId}:`)) {
+      threadDetailVersionByKey.delete(key);
+    }
+  }
+}
+
+function replaceShellItem<T extends { readonly id: string }>(
+  items: ReadonlyArray<T>,
+  nextItem: T,
+): T[] {
+  const existingIndex = items.findIndex((item) => item.id === nextItem.id);
+  if (existingIndex === -1) {
+    return [...items, nextItem];
+  }
+
+  const nextItems = [...items];
+  nextItems[existingIndex] = nextItem;
+  return nextItems;
+}
+
+function removeShellItem<T extends { readonly id: string }>(
+  items: ReadonlyArray<T>,
+  itemId: string,
+): T[] {
+  return items.filter((item) => item.id !== itemId);
+}
+
+function updateCachedShellSnapshot(
+  environmentId: EnvironmentId,
+  sequence: number,
+  shellEvent?: OrchestrationShellStreamEvent,
+): OrchestrationShellSnapshot | null {
+  const snapshot = cachedShellSnapshotByEnvironment.get(environmentId);
+  if (!snapshot || sequence < snapshot.snapshotSequence) {
+    return snapshot ?? null;
+  }
+
+  let projects = snapshot.projects;
+  let threads = snapshot.threads;
+  switch (shellEvent?.kind) {
+    case "project-upserted":
+      projects = replaceShellItem(projects, shellEvent.project);
+      break;
+    case "project-removed":
+      projects = removeShellItem(projects, shellEvent.projectId);
+      break;
+    case "thread-upserted":
+      threads = replaceShellItem(threads, shellEvent.thread);
+      break;
+    case "thread-removed":
+      threads = removeShellItem(threads, shellEvent.threadId);
+      break;
+    case undefined:
+      break;
+  }
+
+  const nextSnapshot: OrchestrationShellSnapshot = {
+    ...snapshot,
+    snapshotSequence: sequence,
+    projects,
+    threads,
+    updatedAt: new Date().toISOString(),
+  };
+  cachedShellSnapshotByEnvironment.set(environmentId, nextSnapshot);
+  return nextSnapshot;
+}
+
+function getEventThreadId(event: OrchestrationEvent): ThreadId | null {
+  return event.aggregateKind === "thread" ? (event.aggregateId as ThreadId) : null;
+}
+
+function persistAppliedCacheState(input: {
+  readonly environmentId: EnvironmentId;
+  readonly sequence: number;
+  readonly threadId?: ThreadId | null;
+}): void {
+  const shell = cachedShellSnapshotByEnvironment.get(input.environmentId) ?? null;
+  const thread =
+    input.threadId && readThreadDetailVersion(input.environmentId, input.threadId) !== null
+      ? selectThreadByRef(useStore.getState(), scopeThreadRef(input.environmentId, input.threadId))
+      : null;
+
+  if (!shell || (thread && shell.snapshotSequence < input.sequence)) {
+    return;
+  }
+
+  void persistCachedAppliedState({
+    environmentId: input.environmentId,
+    shell,
+    ...(thread
+      ? {
+          threadDetail: {
+            threadId: input.threadId as ThreadId,
+            sequence: input.sequence,
+            thread,
+          },
+        }
+      : {}),
+  }).catch(() => undefined);
+}
+
+function deleteCachedThreadDetailState(environmentId: EnvironmentId, threadId: ThreadId): void {
+  clearThreadDetailVersion(environmentId, threadId);
+  void deleteCachedThreadDetail(environmentId, threadId).catch(() => undefined);
+}
+
 function clearThreadDetailSubscriptionEviction(
   entry: ThreadDetailSubscriptionEntry,
 ): ThreadDetailSubscriptionEntry {
@@ -307,11 +447,27 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
     return false;
   }
 
+  if (readThreadDetailVersion(entry.environmentId, entry.threadId) !== null) {
+    entry.unsubscribe = () => undefined;
+    void touchCachedThreadDetail(entry.environmentId, entry.threadId).catch(() => undefined);
+    return true;
+  }
+
   entry.unsubscribe = connection.client.orchestration.subscribeThread(
     { threadId: entry.threadId },
     (item) => {
       if (item.kind === "snapshot") {
         useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+        markThreadDetailVersion(
+          entry.environmentId,
+          entry.threadId,
+          item.snapshot.snapshotSequence,
+        );
+        persistAppliedCacheState({
+          environmentId: entry.environmentId,
+          sequence: item.snapshot.snapshotSequence,
+          threadId: entry.threadId,
+        });
       }
     },
   );
@@ -759,6 +915,7 @@ function applyShellProjectionEvent(
     case "thread-removed":
       if (threadRef) {
         disposeThreadDetailSubscriptionByKey(scopedThreadKey(threadRef));
+        deleteCachedThreadDetailState(environmentId, event.threadId);
         useComposerDraftStore.getState().clearDraftThread(threadRef);
         useUiStateStore.getState().clearThreadUi(scopedThreadKey(threadRef));
         useTerminalStateStore.getState().removeTerminalState(threadRef);
@@ -779,7 +936,97 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
   }
 
   applyShellProjectionEvent(event, environmentId);
+  updateCachedShellSnapshot(environmentId, event.sequence, event);
+  persistAppliedCacheState({
+    environmentId,
+    sequence: event.sequence,
+  });
   markAppliedProjectionEvent(environmentId, event.sequence);
+}
+
+function resetThreadDetailCacheForEnvironment(environmentId: EnvironmentId): void {
+  clearThreadDetailVersionsForEnvironment(environmentId);
+  useStore.getState().clearEnvironmentThreadDetails(environmentId);
+  void clearCachedThreadDetailsForEnvironment(environmentId).catch(() => undefined);
+
+  for (const entry of threadDetailSubscriptions.values()) {
+    if (entry.environmentId !== environmentId) {
+      continue;
+    }
+    entry.unsubscribe();
+    entry.unsubscribe = NOOP;
+    if (entry.refCount > 0 && !attachThreadDetailSubscription(entry)) {
+      watchThreadDetailSubscriptionConnection(entry);
+    }
+  }
+}
+
+function syncShellSnapshot(
+  snapshot: OrchestrationShellSnapshot,
+  environmentId: EnvironmentId,
+  options?: {
+    readonly persist?: boolean;
+    readonly invalidateThreadDetailsOnGap?: boolean;
+  },
+): void {
+  const currentVersion = readLastAppliedProjectionVersion(environmentId);
+  if (
+    !shouldApplyProjectionSnapshot({
+      current: currentVersion,
+      next: snapshot,
+    })
+  ) {
+    return;
+  }
+
+  if (
+    options?.invalidateThreadDetailsOnGap !== false &&
+    currentVersion !== null &&
+    snapshot.snapshotSequence > currentVersion.sequence
+  ) {
+    resetThreadDetailCacheForEnvironment(environmentId);
+  }
+
+  useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
+  cachedShellSnapshotByEnvironment.set(environmentId, snapshot);
+  markAppliedProjectionSnapshot(environmentId, snapshot);
+  if (options?.persist !== false) {
+    void persistCachedAppliedState({
+      environmentId,
+      shell: snapshot,
+    }).catch(() => undefined);
+  }
+  reconcileThreadDetailSubscriptionsForEnvironment(
+    environmentId,
+    snapshot.threads.map((thread) => thread.id),
+  );
+  reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
+  reconcileSnapshotDerivedState();
+}
+
+async function hydrateCachedEnvironmentState(environmentId: EnvironmentId): Promise<void> {
+  const cachedState = await readCachedEnvironmentState(environmentId);
+  if (!cachedState.shell) {
+    return;
+  }
+
+  syncShellSnapshot(cachedState.shell, environmentId, {
+    persist: false,
+    invalidateThreadDetailsOnGap: false,
+  });
+
+  const shellThreadIds = new Set(cachedState.shell.threads.map((thread) => thread.id));
+  for (const record of cachedState.threads) {
+    if (
+      !shellThreadIds.has(record.threadId) ||
+      record.sequence > cachedState.shell.snapshotSequence
+    ) {
+      deleteCachedThreadDetailState(environmentId, record.threadId);
+      continue;
+    }
+    useStore.getState().syncCachedThreadDetail(record.thread);
+    markThreadDetailVersion(environmentId, record.threadId, record.sequence);
+  }
 }
 
 function applyDeltaEvent(
@@ -801,6 +1048,27 @@ function applyDeltaEvent(
   applyRecoveredEventBatch([item.event], environmentId);
   if (item.shellEvent) {
     applyShellProjectionEvent(item.shellEvent, environmentId);
+  }
+  updateCachedShellSnapshot(environmentId, item.event.sequence, item.shellEvent);
+  const threadId = getEventThreadId(item.event);
+  if (threadId && item.event.type === "thread.deleted") {
+    deleteCachedThreadDetailState(environmentId, threadId);
+    persistAppliedCacheState({
+      environmentId,
+      sequence: item.event.sequence,
+    });
+  } else if (threadId && readThreadDetailVersion(environmentId, threadId) !== null) {
+    markThreadDetailVersion(environmentId, threadId, item.event.sequence);
+    persistAppliedCacheState({
+      environmentId,
+      sequence: item.event.sequence,
+      threadId,
+    });
+  } else {
+    persistAppliedCacheState({
+      environmentId,
+      sequence: item.event.sequence,
+    });
   }
   markAppliedProjectionEvent(environmentId, item.event.sequence);
 }
@@ -825,25 +1093,8 @@ function createEnvironmentConnectionHandlers() {
     applyDeltaEvent,
     markCaughtUp,
     readAppliedSequence,
-    syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
-      if (
-        !shouldApplyProjectionSnapshot({
-          current: readLastAppliedProjectionVersion(environmentId),
-          next: snapshot,
-        })
-      ) {
-        return;
-      }
-
-      useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
-      markAppliedProjectionSnapshot(environmentId, snapshot);
-      reconcileThreadDetailSubscriptionsForEnvironment(
-        environmentId,
-        snapshot.threads.map((thread) => thread.id),
-      );
-      reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
-      reconcileSnapshotDerivedState();
-    },
+    hydrateCachedState: hydrateCachedEnvironmentState,
+    syncShellSnapshot,
     applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => {
       const threadRef = scopeThreadRef(environmentId, ThreadId.make(event.threadId));
       const serverThread = selectThreadByRef(useStore.getState(), threadRef);
@@ -964,6 +1215,8 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
 
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
+  cachedShellSnapshotByEnvironment.delete(environmentId);
+  clearThreadDetailVersionsForEnvironment(environmentId);
   environmentConnections.delete(environmentId);
   emitEnvironmentConnectionRegistryChange();
   await connection.dispose();

@@ -31,6 +31,7 @@ interface OrchestrationHandlers {
   ) => void;
   readonly markCaughtUp: (sequence: number, environmentId: EnvironmentId) => boolean;
   readonly readAppliedSequence: (environmentId: EnvironmentId) => number | null;
+  readonly hydrateCachedState?: (environmentId: EnvironmentId) => Promise<void>;
   readonly applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => void;
 }
 
@@ -42,6 +43,8 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
 }
+
+const NOOP = () => undefined;
 
 function createBootstrapGate() {
   type BootstrapGateStatus = "ready" | "reset";
@@ -95,6 +98,7 @@ export function createEnvironmentConnection(
 
   let disposed = false;
   const bootstrapGate = createBootstrapGate();
+  let unsubEvents: () => void = NOOP;
 
   const observeEnvironmentIdentity = (nextEnvironmentId: EnvironmentId, source: string) => {
     if (environmentId !== nextEnvironmentId) {
@@ -131,31 +135,41 @@ export function createEnvironmentConnection(
     },
   );
 
-  const unsubEvents = input.client.orchestration.subscribeEvents(
-    (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeEvents"]>[0]>[0]) => {
-      if (item.kind === "snapshot") {
-        input.syncShellSnapshot(item.snapshot, environmentId);
-        bootstrapGate.resolve();
-        return;
-      }
-      if (item.kind === "caught-up") {
-        if (input.markCaughtUp(item.sequence, environmentId)) {
+  const startOrchestrationSubscription = () => {
+    if (disposed) {
+      return;
+    }
+
+    unsubEvents = input.client.orchestration.subscribeEvents(
+      (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeEvents"]>[0]>[0]) => {
+        if (item.kind === "snapshot") {
+          input.syncShellSnapshot(item.snapshot, environmentId);
           bootstrapGate.resolve();
-        }
-        return;
-      }
-      input.applyDeltaEvent(item, environmentId);
-    },
-    {
-      fromSequenceExclusive: () => input.readAppliedSequence(environmentId),
-      onResubscribe: () => {
-        if (disposed) {
           return;
         }
-        resetBootstrap();
+        if (item.kind === "caught-up") {
+          if (input.markCaughtUp(item.sequence, environmentId)) {
+            bootstrapGate.resolve();
+          }
+          return;
+        }
+        input.applyDeltaEvent(item, environmentId);
       },
-    },
-  );
+      {
+        fromSequenceExclusive: () => input.readAppliedSequence(environmentId),
+        onResubscribe: () => {
+          if (disposed) {
+            return;
+          }
+          resetBootstrap();
+        },
+      },
+    );
+  };
+
+  void Promise.resolve(input.hydrateCachedState?.(environmentId))
+    .catch(() => undefined)
+    .finally(startOrchestrationSubscription);
 
   const unsubTerminalEvent = input.client.terminal.onEvent(
     (event: Parameters<Parameters<WsRpcClient["terminal"]["onEvent"]>[0]>[0]) => {

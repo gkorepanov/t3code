@@ -1139,6 +1139,34 @@ export function syncServerThreadDetail(
   );
 }
 
+export function syncCachedThreadDetail(state: AppState, thread: Thread): AppState {
+  const environmentState = getStoredEnvironmentState(state, thread.environmentId);
+  const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
+  return commitEnvironmentState(
+    state,
+    thread.environmentId,
+    writeThreadState(environmentState, thread, previousThread),
+  );
+}
+
+export function clearEnvironmentThreadDetails(
+  state: AppState,
+  environmentId: EnvironmentId,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  return commitEnvironmentState(state, environmentId, {
+    ...environmentState,
+    messageIdsByThreadId: {},
+    messageByThreadId: {},
+    activityIdsByThreadId: {},
+    activityByThreadId: {},
+    proposedPlanIdsByThreadId: {},
+    proposedPlanByThreadId: {},
+    turnDiffIdsByThreadId: {},
+    turnDiffSummaryByThreadId: {},
+  });
+}
+
 function applyEnvironmentOrchestrationEvent(
   state: EnvironmentState,
   event: OrchestrationEvent,
@@ -1938,6 +1966,8 @@ interface AppStore extends AppState {
     environmentId: EnvironmentId,
   ) => void;
   syncServerThreadDetail: (thread: OrchestrationThread, environmentId: EnvironmentId) => void;
+  syncCachedThreadDetail: (thread: Thread) => void;
+  clearEnvironmentThreadDetails: (environmentId: EnvironmentId) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent, environmentId: EnvironmentId) => void;
   applyOrchestrationEvents: (
     events: ReadonlyArray<OrchestrationEvent>,
@@ -1960,6 +1990,9 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
   syncServerThreadDetail: (thread, environmentId) =>
     set((state) => syncServerThreadDetail(state, thread, environmentId)),
+  syncCachedThreadDetail: (thread) => set((state) => syncCachedThreadDetail(state, thread)),
+  clearEnvironmentThreadDetails: (environmentId) =>
+    set((state) => clearEnvironmentThreadDetails(state, environmentId)),
   applyOrchestrationEvent: (event, environmentId) =>
     set((state) => applyOrchestrationEvent(state, event, environmentId)),
   applyOrchestrationEvents: (events, environmentId) =>
