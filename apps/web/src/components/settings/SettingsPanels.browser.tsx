@@ -332,6 +332,7 @@ const createDesktopBridgeStub = (overrides?: {
         agentIsRunning: false,
         sleepBlockerActive: false,
       }),
+    showAgentTurnNotification: vi.fn().mockResolvedValue(true),
     pickFolder: vi.fn().mockResolvedValue(null),
     confirm: vi.fn().mockResolvedValue(false),
     setTheme: vi.fn().mockResolvedValue(undefined),

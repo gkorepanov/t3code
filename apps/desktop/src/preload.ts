@@ -30,6 +30,7 @@ const GET_AGENT_SLEEP_STATE_CHANNEL = "desktop:get-agent-sleep-state";
 const SET_PREVENT_SLEEP_WHILE_AGENT_IS_RUNNING_CHANNEL =
   "desktop:set-prevent-sleep-while-agent-is-running";
 const SET_AGENT_RUNNING_STATE_CHANNEL = "desktop:set-agent-running-state";
+const SHOW_AGENT_TURN_NOTIFICATION_CHANNEL = "desktop:show-agent-turn-notification";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
@@ -64,6 +65,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(SET_PREVENT_SLEEP_WHILE_AGENT_IS_RUNNING_CHANNEL, enabled),
   setAgentRunningState: (agentIsRunning) =>
     ipcRenderer.invoke(SET_AGENT_RUNNING_STATE_CHANNEL, agentIsRunning),
+  showAgentTurnNotification: (notification) =>
+    ipcRenderer.invoke(SHOW_AGENT_TURN_NOTIFICATION_CHANNEL, notification),
   pickFolder: (options) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, options),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),

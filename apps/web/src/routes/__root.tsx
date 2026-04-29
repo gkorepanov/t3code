@@ -13,6 +13,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
+import { DesktopAgentNotificationsCoordinator } from "../components/DesktopAgentNotificationsCoordinator";
 import { DesktopSleepBlockerCoordinator } from "../components/DesktopSleepBlockerCoordinator";
 import {
   SlowRpcAckToastCoordinator,
@@ -99,6 +100,7 @@ function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         <AuthenticatedTracingBootstrap />
+        <DesktopAgentNotificationsCoordinator />
         <DesktopSleepBlockerCoordinator />
         <ServerStateBootstrap />
         <EnvironmentConnectionManagerBootstrap />

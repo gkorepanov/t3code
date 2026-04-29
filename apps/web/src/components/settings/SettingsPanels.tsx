@@ -574,6 +574,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     !isElectron &&
     settings.voiceTranscription.openaiApiKey !==
       DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey;
+  const areAgentNotificationsDirty =
+    isElectron &&
+    settings.agentCompletionNotificationsEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled;
 
   const changedSettingLabels = useMemo(
     () => [
@@ -596,6 +600,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(areAgentNotificationsDirty ? ["Agent notifications"] : []),
       ...(isVoiceTranscriptionDirty ? ["Voice transcription"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
@@ -614,6 +619,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ],
     [
       areProviderSettingsDirty,
+      areAgentNotificationsDirty,
       isGitWritingModelDirty,
       settings.autoOpenPlanSidebar,
       settings.confirmThreadArchive,
@@ -1072,6 +1078,36 @@ export function GeneralSettingsPanel() {
         />
 
         <DesktopAgentSleepSettingsRow />
+
+        {isElectron ? (
+          <SettingsRow
+            title="Agent notifications"
+            description="Show desktop notifications when an agent finishes or fails."
+            resetAction={
+              settings.agentCompletionNotificationsEnabled !==
+              DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled ? (
+                <SettingResetButton
+                  label="agent notifications"
+                  onClick={() =>
+                    updateSettings({
+                      agentCompletionNotificationsEnabled:
+                        DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.agentCompletionNotificationsEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ agentCompletionNotificationsEnabled: Boolean(checked) })
+                }
+                aria-label="Show agent completion notifications"
+              />
+            }
+          />
+        ) : null}
 
         {!isElectron ? (
           <SettingsRow

@@ -163,6 +163,11 @@ export interface DesktopAgentSleepState {
   sleepBlockerActive: boolean;
 }
 
+export interface DesktopAgentTurnNotification {
+  status: "completed" | "failed";
+  threadTitle: string;
+}
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -180,6 +185,7 @@ export interface DesktopBridge {
   getAgentSleepState: () => Promise<DesktopAgentSleepState>;
   setPreventSleepWhileAgentIsRunning: (enabled: boolean) => Promise<DesktopAgentSleepState>;
   setAgentRunningState: (agentIsRunning: boolean) => Promise<DesktopAgentSleepState>;
+  showAgentTurnNotification: (notification: DesktopAgentTurnNotification) => Promise<boolean>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;

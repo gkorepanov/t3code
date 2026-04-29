@@ -14,6 +14,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  Notification,
   powerSaveBlocker,
   protocol,
   safeStorage,
@@ -32,6 +33,7 @@ import type {
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
   DesktopUpdateState,
+  DesktopAgentTurnNotification,
 } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
@@ -113,6 +115,7 @@ const GET_AGENT_SLEEP_STATE_CHANNEL = "desktop:get-agent-sleep-state";
 const SET_PREVENT_SLEEP_WHILE_AGENT_IS_RUNNING_CHANNEL =
   "desktop:set-prevent-sleep-while-agent-is-running";
 const SET_AGENT_RUNNING_STATE_CHANNEL = "desktop:set-agent-running-state";
+const SHOW_AGENT_TURN_NOTIFICATION_CHANNEL = "desktop:show-agent-turn-notification";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
@@ -395,6 +398,56 @@ function applyPreventSleepWhileAgentIsRunningPreference(
 
 function setDesktopAgentRunningState(agentIsRunning: boolean): DesktopAgentSleepState {
   return agentSleepBlocker.setAgentRunningState(agentIsRunning);
+}
+
+function getSafeAgentTurnNotification(
+  rawNotification: unknown,
+): DesktopAgentTurnNotification | null {
+  if (typeof rawNotification !== "object" || rawNotification === null) {
+    return null;
+  }
+
+  const notification = rawNotification as {
+    readonly status?: unknown;
+    readonly threadTitle?: unknown;
+  };
+  if (notification.status !== "completed" && notification.status !== "failed") {
+    return null;
+  }
+  if (typeof notification.threadTitle !== "string") {
+    return null;
+  }
+
+  return {
+    status: notification.status,
+    threadTitle: sanitizeLogValue(notification.threadTitle).slice(0, 160) || "Chat",
+  };
+}
+
+function showDesktopAgentTurnNotification(notification: DesktopAgentTurnNotification): boolean {
+  if (!Notification.isSupported()) {
+    return false;
+  }
+
+  const nativeNotification = new Notification({
+    title: notification.status === "failed" ? "Agent failed" : "Agent finished",
+    body: notification.threadTitle,
+    silent: false,
+  });
+
+  nativeNotification.on("click", () => {
+    const window = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+    if (!window) {
+      return;
+    }
+    if (window.isMinimized()) {
+      window.restore();
+    }
+    window.show();
+    window.focus();
+  });
+  nativeNotification.show();
+  return true;
 }
 
 function relaunchDesktopApp(reason: string): void {
@@ -1729,6 +1782,16 @@ function registerIpcHandlers(): void {
     }
 
     return setDesktopAgentRunningState(rawAgentIsRunning);
+  });
+
+  ipcMain.removeHandler(SHOW_AGENT_TURN_NOTIFICATION_CHANNEL);
+  ipcMain.handle(SHOW_AGENT_TURN_NOTIFICATION_CHANNEL, async (_event, rawNotification: unknown) => {
+    const notification = getSafeAgentTurnNotification(rawNotification);
+    if (!notification) {
+      throw new Error("Invalid desktop agent turn notification payload.");
+    }
+
+    return showDesktopAgentTurnNotification(notification);
   });
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);

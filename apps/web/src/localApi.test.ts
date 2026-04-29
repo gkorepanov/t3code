@@ -211,6 +211,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       agentIsRunning,
       sleepBlockerActive: false,
     }),
+    showAgentTurnNotification: async () => true,
     pickFolder: async () => null,
     confirm: async () => true,
     setTheme: async () => undefined,
