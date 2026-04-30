@@ -41,11 +41,11 @@ export interface CachedThreadDetailRecord {
 interface PersistAppliedStateInput {
   readonly environmentId: EnvironmentId;
   readonly shell: OrchestrationShellSnapshot | null;
-  readonly threadDetail?: {
+  readonly threadDetails?: ReadonlyArray<{
     readonly threadId: ThreadId;
     readonly sequence: number;
     readonly thread: Thread;
-  };
+  }>;
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
@@ -259,31 +259,36 @@ export async function persistCachedAppliedState(input: PersistAppliedStateInput)
 
   const shellRecord =
     input.shell === null ? null : createEnvironmentShellRecord(input.environmentId, input.shell);
-  const threadRecord = input.threadDetail
-    ? createThreadDetailRecord({
-        environmentId: input.environmentId,
-        threadId: input.threadDetail.threadId,
-        sequence: input.threadDetail.sequence,
-        thread: input.threadDetail.thread,
-      })
-    : null;
-
-  if (threadRecord && threadRecord.sizeBytes > MAX_THREAD_CACHE_BYTES) {
-    await deleteCachedThreadDetail(input.environmentId, threadRecord.threadId);
-    return;
+  const threadRecords = (input.threadDetails ?? []).map((threadDetail) =>
+    createThreadDetailRecord({
+      environmentId: input.environmentId,
+      threadId: threadDetail.threadId,
+      sequence: threadDetail.sequence,
+      thread: threadDetail.thread,
+    }),
+  );
+  const oversizedThreadRecords = threadRecords.filter(
+    (record) => record.sizeBytes > MAX_THREAD_CACHE_BYTES,
+  );
+  for (const record of oversizedThreadRecords) {
+    await deleteCachedThreadDetail(input.environmentId, record.threadId);
   }
+  const storableThreadRecords = threadRecords.filter(
+    (record) => record.sizeBytes <= MAX_THREAD_CACHE_BYTES,
+  );
 
   const transaction = db.transaction([ENVIRONMENT_STORE, THREAD_STORE], "readwrite");
   const done = transactionDone(transaction);
   if (shellRecord) {
     await putEnvironmentShellIfNewer(transaction.objectStore(ENVIRONMENT_STORE), shellRecord);
   }
-  if (threadRecord) {
-    await putThreadDetailIfNewer(transaction.objectStore(THREAD_STORE), threadRecord);
+  const threadStore = transaction.objectStore(THREAD_STORE);
+  for (const threadRecord of storableThreadRecords) {
+    await putThreadDetailIfNewer(threadStore, threadRecord);
   }
   await done;
 
-  if (threadRecord) {
+  if (storableThreadRecords.length > 0) {
     await enforceThreadCacheBudget(db);
   }
 }

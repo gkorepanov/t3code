@@ -68,6 +68,7 @@ import {
   derivePhysicalProjectKey,
 } from "../../logicalProject";
 import { getClientSettings } from "~/hooks/useSettings";
+import type { Thread } from "~/types";
 import {
   clearCachedThreadDetailsForEnvironment,
   deleteCachedThreadDetail,
@@ -106,6 +107,22 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
 const cachedShellSnapshotByEnvironment = new Map<EnvironmentId, OrchestrationShellSnapshot>();
 const threadDetailVersionByKey = new Map<string, number>();
 const pendingDeltaReplayByEnvironment = new Set<EnvironmentId>();
+const pendingCachePersistByEnvironment = new Map<
+  EnvironmentId,
+  {
+    shell: OrchestrationShellSnapshot | null;
+    threadDetailsByKey: Map<
+      string,
+      {
+        threadId: ThreadId;
+        sequence: number;
+        thread: Thread;
+      }
+    >;
+    timeoutId: ReturnType<typeof setTimeout> | null;
+  }
+>();
+const lastCachePersistAtByEnvironment = new Map<EnvironmentId, number>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -119,6 +136,7 @@ let needsProviderInvalidation = false;
 // - Capacity eviction only targets idle cached subscriptions.
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
+const CACHE_PERSIST_MIN_INTERVAL_MS = 5_000;
 const NOOP = () => undefined;
 
 function compareAppliedProjectionVersion(
@@ -339,7 +357,53 @@ function getEventThreadId(event: OrchestrationEvent): ThreadId | null {
   return event.aggregateKind === "thread" ? (event.aggregateId as ThreadId) : null;
 }
 
-function persistAppliedCacheState(input: {
+function flushPendingCachePersist(environmentId: EnvironmentId): void {
+  const pending = pendingCachePersistByEnvironment.get(environmentId);
+  if (!pending) {
+    return;
+  }
+
+  if (pending.timeoutId !== null) {
+    clearTimeout(pending.timeoutId);
+  }
+  pendingCachePersistByEnvironment.delete(environmentId);
+  lastCachePersistAtByEnvironment.set(environmentId, Date.now());
+
+  const shell = pending.shell ?? cachedShellSnapshotByEnvironment.get(environmentId) ?? null;
+  if (!shell) {
+    return;
+  }
+
+  void persistCachedAppliedState({
+    environmentId,
+    shell,
+    threadDetails: [...pending.threadDetailsByKey.values()],
+  }).catch(() => undefined);
+}
+
+function schedulePendingCachePersist(environmentId: EnvironmentId): void {
+  const pending = pendingCachePersistByEnvironment.get(environmentId);
+  if (!pending || pending.timeoutId !== null) {
+    return;
+  }
+
+  const lastPersistedAt = lastCachePersistAtByEnvironment.get(environmentId) ?? 0;
+  const delayMs = Math.max(0, CACHE_PERSIST_MIN_INTERVAL_MS - (Date.now() - lastPersistedAt));
+  if (delayMs === 0) {
+    flushPendingCachePersist(environmentId);
+    return;
+  }
+
+  pending.timeoutId = setTimeout(() => {
+    const currentPending = pendingCachePersistByEnvironment.get(environmentId);
+    if (currentPending) {
+      currentPending.timeoutId = null;
+    }
+    flushPendingCachePersist(environmentId);
+  }, delayMs);
+}
+
+function queueAppliedCachePersist(input: {
   readonly environmentId: EnvironmentId;
   readonly sequence: number;
   readonly threadId?: ThreadId | null;
@@ -354,23 +418,31 @@ function persistAppliedCacheState(input: {
     return;
   }
 
-  void persistCachedAppliedState({
-    environmentId: input.environmentId,
-    shell,
-    ...(thread
-      ? {
-          threadDetail: {
-            threadId: input.threadId as ThreadId,
-            sequence: input.sequence,
-            thread,
-          },
-        }
-      : {}),
-  }).catch(() => undefined);
+  const pending = pendingCachePersistByEnvironment.get(input.environmentId) ?? {
+    shell: null,
+    threadDetailsByKey: new Map<string, { threadId: ThreadId; sequence: number; thread: Thread }>(),
+    timeoutId: null,
+  };
+  pending.shell = shell;
+  if (thread && input.threadId) {
+    pending.threadDetailsByKey.set(
+      getThreadDetailSubscriptionKey(input.environmentId, input.threadId),
+      {
+        threadId: input.threadId,
+        sequence: input.sequence,
+        thread,
+      },
+    );
+  }
+  pendingCachePersistByEnvironment.set(input.environmentId, pending);
+  schedulePendingCachePersist(input.environmentId);
 }
 
 function deleteCachedThreadDetailState(environmentId: EnvironmentId, threadId: ThreadId): void {
   clearThreadDetailVersion(environmentId, threadId);
+  pendingCachePersistByEnvironment
+    .get(environmentId)
+    ?.threadDetailsByKey.delete(getThreadDetailSubscriptionKey(environmentId, threadId));
   void deleteCachedThreadDetail(environmentId, threadId).catch(() => undefined);
 }
 
@@ -463,7 +535,7 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
           entry.threadId,
           item.snapshot.snapshotSequence,
         );
-        persistAppliedCacheState({
+        queueAppliedCachePersist({
           environmentId: entry.environmentId,
           sequence: item.snapshot.snapshotSequence,
           threadId: entry.threadId,
@@ -937,7 +1009,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 
   applyShellProjectionEvent(event, environmentId);
   updateCachedShellSnapshot(environmentId, event.sequence, event);
-  persistAppliedCacheState({
+  queueAppliedCachePersist({
     environmentId,
     sequence: event.sequence,
   });
@@ -946,6 +1018,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 
 function resetThreadDetailCacheForEnvironment(environmentId: EnvironmentId): void {
   clearThreadDetailVersionsForEnvironment(environmentId);
+  pendingCachePersistByEnvironment.get(environmentId)?.threadDetailsByKey.clear();
   useStore.getState().clearEnvironmentThreadDetails(environmentId);
   void clearCachedThreadDetailsForEnvironment(environmentId).catch(() => undefined);
 
@@ -991,10 +1064,10 @@ function syncShellSnapshot(
   cachedShellSnapshotByEnvironment.set(environmentId, snapshot);
   markAppliedProjectionSnapshot(environmentId, snapshot);
   if (options?.persist !== false) {
-    void persistCachedAppliedState({
+    queueAppliedCachePersist({
       environmentId,
-      shell: snapshot,
-    }).catch(() => undefined);
+      sequence: snapshot.snapshotSequence,
+    });
   }
   reconcileThreadDetailSubscriptionsForEnvironment(
     environmentId,
@@ -1053,19 +1126,19 @@ function applyDeltaEvent(
   const threadId = getEventThreadId(item.event);
   if (threadId && item.event.type === "thread.deleted") {
     deleteCachedThreadDetailState(environmentId, threadId);
-    persistAppliedCacheState({
+    queueAppliedCachePersist({
       environmentId,
       sequence: item.event.sequence,
     });
   } else if (threadId && readThreadDetailVersion(environmentId, threadId) !== null) {
     markThreadDetailVersion(environmentId, threadId, item.event.sequence);
-    persistAppliedCacheState({
+    queueAppliedCachePersist({
       environmentId,
       sequence: item.event.sequence,
       threadId,
     });
   } else {
-    persistAppliedCacheState({
+    queueAppliedCachePersist({
       environmentId,
       sequence: item.event.sequence,
     });
@@ -1214,6 +1287,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
   }
 
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
+  flushPendingCachePersist(environmentId);
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
   cachedShellSnapshotByEnvironment.delete(environmentId);
   clearThreadDetailVersionsForEnvironment(environmentId);
