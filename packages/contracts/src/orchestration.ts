@@ -1129,6 +1129,15 @@ export const OrchestrationEventDeltaStreamItem = Schema.Union([
     shellEvent: Schema.optional(OrchestrationShellStreamEvent),
   }),
   Schema.Struct({
+    kind: Schema.Literal("event-batch"),
+    events: Schema.NonEmptyArray(
+      Schema.Struct({
+        event: OrchestrationEvent,
+        shellEvent: Schema.optional(OrchestrationShellStreamEvent),
+      }),
+    ),
+  }),
+  Schema.Struct({
     kind: Schema.Literal("caught-up"),
     sequence: NonNegativeInt,
   }),

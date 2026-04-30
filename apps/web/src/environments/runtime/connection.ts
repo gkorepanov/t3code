@@ -22,7 +22,7 @@ export interface EnvironmentConnection {
 
 interface OrchestrationHandlers {
   readonly applyDeltaEvent: (
-    item: Extract<OrchestrationEventDeltaStreamItem, { kind: "event" }>,
+    item: Extract<OrchestrationEventDeltaStreamItem, { kind: "event" | "event-batch" }>,
     environmentId: EnvironmentId,
   ) => void;
   readonly syncShellSnapshot: (

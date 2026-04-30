@@ -314,6 +314,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         Effect.forEach(events, enrichProjectEvent, { concurrency: 4 });
 
       const MAX_DELTA_REPLAY_EVENT_COUNT = 5_000;
+      const DELTA_STREAM_BATCH_SIZE = 100;
+      const DELTA_STREAM_BATCH_WINDOW = Duration.millis(50);
 
       const toShellStreamEvent = (
         event: OrchestrationEvent,
@@ -366,24 +368,202 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         }
       };
 
-      const toDeltaStreamItem = (
-        item: OrchestrationEventReplayStreamItem,
-      ): Effect.Effect<OrchestrationEventDeltaStreamItem> => {
-        if (item.kind === "caught-up") {
-          return Effect.succeed({
-            kind: "caught-up" as const,
-            sequence: item.sequence,
-          });
+      type DeltaEventStreamItem = Extract<OrchestrationEventDeltaStreamItem, { kind: "event" }>;
+      type ShellProjectionRequest =
+        | {
+            readonly kind: "project-upserted";
+            readonly sequence: number;
+            readonly projectId: Extract<
+              OrchestrationEvent,
+              { type: "project.created" | "project.meta-updated" | "project.deleted" }
+            >["payload"]["projectId"];
+          }
+        | {
+            readonly kind: "project-removed";
+            readonly sequence: number;
+            readonly projectId: Extract<
+              OrchestrationEvent,
+              { type: "project.created" | "project.meta-updated" | "project.deleted" }
+            >["payload"]["projectId"];
+          }
+        | {
+            readonly kind: "thread-upserted";
+            readonly sequence: number;
+            readonly threadId: ThreadId;
+          }
+        | {
+            readonly kind: "thread-removed";
+            readonly sequence: number;
+            readonly threadId: ThreadId;
+          };
+
+      const collectShellProjectionRequests = (
+        events: ReadonlyArray<OrchestrationEvent>,
+      ): ShellProjectionRequest[] => {
+        const latestByKey = new Map<string, ShellProjectionRequest>();
+
+        for (const event of events) {
+          switch (event.type) {
+            case "project.created":
+            case "project.meta-updated":
+              latestByKey.set(`project:${event.payload.projectId}`, {
+                kind: "project-upserted",
+                sequence: event.sequence,
+                projectId: event.payload.projectId,
+              });
+              break;
+            case "project.deleted":
+              latestByKey.set(`project:${event.payload.projectId}`, {
+                kind: "project-removed",
+                sequence: event.sequence,
+                projectId: event.payload.projectId,
+              });
+              break;
+            case "thread.deleted":
+              latestByKey.set(`thread:${event.payload.threadId}`, {
+                kind: "thread-removed",
+                sequence: event.sequence,
+                threadId: event.payload.threadId,
+              });
+              break;
+            default:
+              if (event.aggregateKind === "thread") {
+                const threadId = ThreadId.make(event.aggregateId);
+                latestByKey.set(`thread:${threadId}`, {
+                  kind: "thread-upserted",
+                  sequence: event.sequence,
+                  threadId,
+                });
+              }
+              break;
+          }
         }
 
-        return toShellStreamEvent(item.event).pipe(
-          Effect.map((shellEvent) => ({
-            kind: "event" as const,
-            event: item.event,
-            ...(Option.isSome(shellEvent) ? { shellEvent: shellEvent.value } : {}),
-          })),
-        );
+        return [...latestByKey.values()];
       };
+
+      const loadShellProjectionEvent = (
+        request: ShellProjectionRequest,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
+        switch (request.kind) {
+          case "project-upserted":
+            return projectionSnapshotQuery.getProjectShellById(request.projectId).pipe(
+              Effect.map((project) =>
+                Option.map(project, (nextProject) => ({
+                  kind: "project-upserted" as const,
+                  sequence: request.sequence,
+                  project: nextProject,
+                })),
+              ),
+              Effect.catch(() => Effect.succeed(Option.none())),
+            );
+          case "project-removed":
+            return Effect.succeed(
+              Option.some({
+                kind: "project-removed" as const,
+                sequence: request.sequence,
+                projectId: request.projectId,
+              }),
+            );
+          case "thread-upserted":
+            return projectionSnapshotQuery.getThreadShellById(request.threadId).pipe(
+              Effect.map((thread) =>
+                Option.map(thread, (nextThread) => ({
+                  kind: "thread-upserted" as const,
+                  sequence: request.sequence,
+                  thread: nextThread,
+                })),
+              ),
+              Effect.catch(() => Effect.succeed(Option.none())),
+            );
+          case "thread-removed":
+            return Effect.succeed(
+              Option.some({
+                kind: "thread-removed" as const,
+                sequence: request.sequence,
+                threadId: request.threadId,
+              }),
+            );
+        }
+      };
+
+      const toDeltaEventItems = (
+        events: ReadonlyArray<OrchestrationEvent>,
+      ): Effect.Effect<DeltaEventStreamItem[]> =>
+        Effect.gen(function* () {
+          const shellEvents = yield* Effect.forEach(
+            collectShellProjectionRequests(events),
+            loadShellProjectionEvent,
+            { concurrency: 8 },
+          );
+          const shellEventBySequence = new Map<number, OrchestrationShellStreamEvent>();
+          for (const shellEvent of shellEvents) {
+            if (Option.isSome(shellEvent)) {
+              shellEventBySequence.set(shellEvent.value.sequence, shellEvent.value);
+            }
+          }
+
+          return events.map((event) => {
+            const shellEvent = shellEventBySequence.get(event.sequence);
+            return {
+              kind: "event" as const,
+              event,
+              ...(shellEvent ? { shellEvent } : {}),
+            };
+          });
+        });
+
+      const toDeltaEventStreamItem = (
+        events: readonly [OrchestrationEvent, ...OrchestrationEvent[]],
+      ): Effect.Effect<OrchestrationEventDeltaStreamItem> =>
+        toDeltaEventItems(events).pipe(
+          Effect.map((deltaEvents) =>
+            deltaEvents.length === 1
+              ? deltaEvents[0]!
+              : {
+                  kind: "event-batch" as const,
+                  events: deltaEvents as [DeltaEventStreamItem, ...DeltaEventStreamItem[]],
+                },
+          ),
+        );
+
+      const toDeltaStreamItems = (
+        items: ReadonlyArray<OrchestrationEventReplayStreamItem>,
+      ): Effect.Effect<OrchestrationEventDeltaStreamItem[]> =>
+        Effect.gen(function* () {
+          const output: OrchestrationEventDeltaStreamItem[] = [];
+          let pendingEvents: OrchestrationEvent[] = [];
+
+          for (const item of items) {
+            if (item.kind === "event") {
+              pendingEvents.push(item.event);
+              continue;
+            }
+
+            if (pendingEvents.length > 0) {
+              output.push(
+                yield* toDeltaEventStreamItem(
+                  pendingEvents as [OrchestrationEvent, ...OrchestrationEvent[]],
+                ),
+              );
+              pendingEvents = [];
+            }
+            output.push({
+              kind: "caught-up" as const,
+              sequence: item.sequence,
+            });
+          }
+
+          if (pendingEvents.length > 0) {
+            output.push(
+              yield* toDeltaEventStreamItem(
+                pendingEvents as [OrchestrationEvent, ...OrchestrationEvent[]],
+              ),
+            );
+          }
+
+          return output;
+        });
 
       const loadShellSnapshot = () =>
         projectionSnapshotQuery.getShellSnapshot().pipe(
@@ -413,7 +593,11 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               minimum: 0,
             }),
           )
-          .pipe(Stream.mapEffect(toDeltaStreamItem));
+          .pipe(
+            Stream.groupedWithin(DELTA_STREAM_BATCH_SIZE, DELTA_STREAM_BATCH_WINDOW),
+            Stream.mapEffect(toDeltaStreamItems),
+            Stream.flatMap((items) => Stream.fromIterable(items)),
+          );
 
         if (options?.fallbackToSnapshotOnFailure) {
           return stream.pipe(

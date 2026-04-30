@@ -107,6 +107,14 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
 const cachedShellSnapshotByEnvironment = new Map<EnvironmentId, OrchestrationShellSnapshot>();
 const threadDetailVersionByKey = new Map<string, number>();
 const pendingDeltaReplayByEnvironment = new Set<EnvironmentId>();
+const pendingDeltaApplyByEnvironment = new Map<
+  EnvironmentId,
+  {
+    items: Array<Extract<OrchestrationEventDeltaStreamItem, { kind: "event" | "event-batch" }>>;
+    eventCount: number;
+    timeoutId: ReturnType<typeof setTimeout> | null;
+  }
+>();
 const pendingCachePersistByEnvironment = new Map<
   EnvironmentId,
   {
@@ -136,6 +144,8 @@ let needsProviderInvalidation = false;
 // - Capacity eviction only targets idle cached subscriptions.
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
+const DELTA_APPLY_IDLE_FLUSH_MS = 50;
+const MAX_PENDING_DELTA_APPLY_EVENTS = 500;
 const CACHE_PERSIST_MIN_INTERVAL_MS = 5_000;
 const NOOP = () => undefined;
 
@@ -1102,51 +1112,142 @@ async function hydrateCachedEnvironmentState(environmentId: EnvironmentId): Prom
   }
 }
 
-function applyDeltaEvent(
-  item: Extract<OrchestrationEventDeltaStreamItem, { kind: "event" }>,
-  environmentId: EnvironmentId,
-) {
-  const currentSequence = readAppliedSequence(environmentId);
-  if (currentSequence !== null && item.event.sequence <= currentSequence) {
-    return;
-  }
-  if (
-    (currentSequence !== null && item.event.sequence !== currentSequence + 1) ||
-    (currentSequence === null && item.event.sequence !== 1)
-  ) {
-    requestDeltaReplay(environmentId);
+type DeltaApplyItem = Extract<OrchestrationEventDeltaStreamItem, { kind: "event" | "event-batch" }>;
+type DeltaEventEntry = {
+  readonly event: OrchestrationEvent;
+  readonly shellEvent?: OrchestrationShellStreamEvent | undefined;
+};
+
+function getDeltaApplyItemEventCount(item: DeltaApplyItem): number {
+  return item.kind === "event" ? 1 : item.events.length;
+}
+
+function flattenDeltaApplyItems(items: ReadonlyArray<DeltaApplyItem>): DeltaEventEntry[] {
+  return items.flatMap((item) =>
+    item.kind === "event"
+      ? [
+          {
+            event: item.event,
+            ...(item.shellEvent ? { shellEvent: item.shellEvent } : {}),
+          },
+        ]
+      : item.events,
+  );
+}
+
+function flushPendingDeltaEvents(environmentId: EnvironmentId): void {
+  const pending = pendingDeltaApplyByEnvironment.get(environmentId);
+  if (!pending) {
     return;
   }
 
-  applyRecoveredEventBatch([item.event], environmentId);
-  if (item.shellEvent) {
-    applyShellProjectionEvent(item.shellEvent, environmentId);
+  if (pending.timeoutId !== null) {
+    clearTimeout(pending.timeoutId);
   }
-  updateCachedShellSnapshot(environmentId, item.event.sequence, item.shellEvent);
-  const threadId = getEventThreadId(item.event);
-  if (threadId && item.event.type === "thread.deleted") {
-    deleteCachedThreadDetailState(environmentId, threadId);
+  pendingDeltaApplyByEnvironment.delete(environmentId);
+  applyDeltaItemsNow(pending.items, environmentId);
+}
+
+function applyDeltaEvent(item: DeltaApplyItem, environmentId: EnvironmentId): void {
+  const pending = pendingDeltaApplyByEnvironment.get(environmentId) ?? {
+    items: [],
+    eventCount: 0,
+    timeoutId: null,
+  };
+  pending.items.push(item);
+  pending.eventCount += getDeltaApplyItemEventCount(item);
+  if (pending.timeoutId !== null) {
+    clearTimeout(pending.timeoutId);
+  }
+
+  pendingDeltaApplyByEnvironment.set(environmentId, pending);
+  if (pending.eventCount >= MAX_PENDING_DELTA_APPLY_EVENTS) {
+    flushPendingDeltaEvents(environmentId);
+    return;
+  }
+
+  pending.timeoutId = setTimeout(() => {
+    const currentPending = pendingDeltaApplyByEnvironment.get(environmentId);
+    if (currentPending) {
+      currentPending.timeoutId = null;
+    }
+    flushPendingDeltaEvents(environmentId);
+  }, DELTA_APPLY_IDLE_FLUSH_MS);
+}
+
+function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId: EnvironmentId) {
+  const deltaEvents = flattenDeltaApplyItems(items);
+  if (deltaEvents.length === 0) {
+    return;
+  }
+
+  const currentSequence = readAppliedSequence(environmentId);
+  const freshDeltaEvents =
+    currentSequence === null
+      ? deltaEvents
+      : deltaEvents.filter((item) => item.event.sequence > currentSequence);
+  if (freshDeltaEvents.length === 0) {
+    return;
+  }
+
+  let expectedSequence = currentSequence ?? 0;
+  for (const item of freshDeltaEvents) {
+    if (item.event.sequence !== expectedSequence + 1) {
+      requestDeltaReplay(environmentId);
+      return;
+    }
+    expectedSequence = item.event.sequence;
+  }
+
+  applyRecoveredEventBatch(
+    freshDeltaEvents.map((deltaEvent) => deltaEvent.event),
+    environmentId,
+  );
+
+  for (const item of freshDeltaEvents) {
+    if (item.shellEvent) {
+      applyShellProjectionEvent(item.shellEvent, environmentId);
+    }
+    updateCachedShellSnapshot(environmentId, item.event.sequence, item.shellEvent);
+  }
+
+  const threadDetailPersistSequences = new Map<ThreadId, number>();
+  for (const item of freshDeltaEvents) {
+    const threadId = getEventThreadId(item.event);
+    if (!threadId) {
+      continue;
+    }
+    if (item.event.type === "thread.deleted") {
+      deleteCachedThreadDetailState(environmentId, threadId);
+      continue;
+    }
+    if (readThreadDetailVersion(environmentId, threadId) !== null) {
+      markThreadDetailVersion(environmentId, threadId, item.event.sequence);
+      threadDetailPersistSequences.set(threadId, item.event.sequence);
+    }
+  }
+
+  const lastSequence = freshDeltaEvents[freshDeltaEvents.length - 1]!.event.sequence;
+  if (threadDetailPersistSequences.size === 0) {
     queueAppliedCachePersist({
       environmentId,
-      sequence: item.event.sequence,
-    });
-  } else if (threadId && readThreadDetailVersion(environmentId, threadId) !== null) {
-    markThreadDetailVersion(environmentId, threadId, item.event.sequence);
-    queueAppliedCachePersist({
-      environmentId,
-      sequence: item.event.sequence,
-      threadId,
+      sequence: lastSequence,
     });
   } else {
-    queueAppliedCachePersist({
-      environmentId,
-      sequence: item.event.sequence,
-    });
+    for (const [threadId, sequence] of threadDetailPersistSequences) {
+      queueAppliedCachePersist({
+        environmentId,
+        sequence,
+        threadId,
+      });
+    }
   }
-  markAppliedProjectionEvent(environmentId, item.event.sequence);
+  markAppliedProjectionEvent(environmentId, lastSequence);
 }
 
 function markCaughtUp(sequence: number, environmentId: EnvironmentId): boolean {
+  flushPendingDeltaEvents(environmentId);
+  schedulePendingCachePersist(environmentId);
   const currentSequence = readAppliedSequence(environmentId);
   if (currentSequence !== null && sequence <= currentSequence) {
     return true;
@@ -1287,6 +1388,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
   }
 
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
+  flushPendingDeltaEvents(environmentId);
   flushPendingCachePersist(environmentId);
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
   cachedShellSnapshotByEnvironment.delete(environmentId);
