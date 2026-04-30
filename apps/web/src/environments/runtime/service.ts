@@ -259,7 +259,7 @@ function requestDeltaReplay(environmentId: EnvironmentId): void {
     }
 
     void connection
-      .reconnect()
+      .refreshEvents()
       .catch(() => undefined)
       .finally(() => {
         pendingDeltaReplayByEnvironment.delete(environmentId);

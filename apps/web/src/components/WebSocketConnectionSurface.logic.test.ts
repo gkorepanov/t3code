@@ -4,6 +4,7 @@ import type { WsConnectionStatus } from "../rpc/wsConnectionState";
 import {
   shouldAutoReconnect,
   shouldForceReconnectOnForeground,
+  shouldRefreshEventsOnForeground,
   shouldRestartStalledReconnect,
 } from "./WebSocketConnectionSurface";
 
@@ -85,14 +86,28 @@ describe("WebSocketConnectionSurface.logic", () => {
     ).toBe(true);
   });
 
-  it("forces reconnect when the page returns from background with a stale connected socket", () => {
+  it("refreshes events when the page returns from background with a connected socket", () => {
+    const connectedStatus = makeStatus({
+      connectedAt: "2026-04-03T20:00:00.000Z",
+      hasConnected: true,
+      online: true,
+      phase: "connected",
+    });
+
+    expect(shouldRefreshEventsOnForeground(connectedStatus, true)).toBe(true);
+    expect(shouldForceReconnectOnForeground(connectedStatus, true)).toBe(false);
+    expect(shouldRefreshEventsOnForeground(connectedStatus, false)).toBe(false);
+  });
+
+  it("forces reconnect when the page returns from background with a disconnected socket", () => {
     expect(
       shouldForceReconnectOnForeground(
         makeStatus({
           connectedAt: "2026-04-03T20:00:00.000Z",
           hasConnected: true,
           online: true,
-          phase: "connected",
+          phase: "disconnected",
+          reconnectPhase: "waiting",
         }),
         true,
       ),
@@ -104,7 +119,8 @@ describe("WebSocketConnectionSurface.logic", () => {
           connectedAt: "2026-04-03T20:00:00.000Z",
           hasConnected: true,
           online: true,
-          phase: "connected",
+          phase: "disconnected",
+          reconnectPhase: "waiting",
         }),
         false,
       ),

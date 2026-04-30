@@ -129,7 +129,25 @@ export function shouldForceReconnectOnForeground(
   status: WsConnectionStatus,
   wasHidden: boolean,
 ): boolean {
-  return wasHidden && status.online && status.hasConnected;
+  return (
+    wasHidden &&
+    status.online &&
+    status.hasConnected &&
+    (status.phase !== "connected" || status.reconnectPhase === "exhausted")
+  );
+}
+
+export function shouldRefreshEventsOnForeground(
+  status: WsConnectionStatus,
+  wasHidden: boolean,
+): boolean {
+  return (
+    wasHidden &&
+    status.online &&
+    status.hasConnected &&
+    status.phase === "connected" &&
+    status.reconnectPhase !== "exhausted"
+  );
 }
 
 export function shouldRestartStalledReconnect(
@@ -181,6 +199,14 @@ export function WebSocketConnectionCoordinator() {
         );
       });
   });
+  const runEventRefresh = useEffectEvent(() => {
+    lastForcedReconnectAtRef.current = Date.now();
+    void getPrimaryEnvironmentConnection()
+      .refreshEvents()
+      .catch((error) => {
+        console.warn("Automatic event stream refresh failed", { error });
+      });
+  });
   const syncBrowserOnlineStatus = useEffectEvent(() => {
     setBrowserOnlineStatus(navigator.onLine !== false);
   });
@@ -202,10 +228,15 @@ export function WebSocketConnectionCoordinator() {
   });
   const triggerForegroundReconnect = useEffectEvent(() => {
     const currentStatus = getWsConnectionStatus();
-    if (!shouldForceReconnectOnForeground(currentStatus, wasDocumentHiddenRef.current)) {
+    if (Date.now() - lastForcedReconnectAtRef.current < FORCED_WS_RECONNECT_DEBOUNCE_MS) {
       return;
     }
-    if (Date.now() - lastForcedReconnectAtRef.current < FORCED_WS_RECONNECT_DEBOUNCE_MS) {
+    if (shouldRefreshEventsOnForeground(currentStatus, wasDocumentHiddenRef.current)) {
+      wasDocumentHiddenRef.current = false;
+      runEventRefresh();
+      return;
+    }
+    if (!shouldForceReconnectOnForeground(currentStatus, wasDocumentHiddenRef.current)) {
       return;
     }
 

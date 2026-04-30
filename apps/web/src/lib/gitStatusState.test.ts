@@ -147,6 +147,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
     client,
     environmentId,
     ensureBootstrapped: async () => undefined,
+    refreshEvents: async () => undefined,
     reconnect: async () => undefined,
     dispose: async () => undefined,
   });

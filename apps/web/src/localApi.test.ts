@@ -126,6 +126,7 @@ vi.mock("./environments/runtime", () => ({
     client: rpcClientMock,
     environmentId: EnvironmentId.make("environment-local"),
     ensureBootstrapped: async () => undefined,
+    refreshEvents: async () => undefined,
     reconnect: async () => undefined,
     dispose: async () => undefined,
   }),

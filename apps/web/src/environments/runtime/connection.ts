@@ -16,6 +16,7 @@ export interface EnvironmentConnection {
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
   readonly ensureBootstrapped: () => Promise<void>;
+  readonly refreshEvents: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
   readonly dispose: () => Promise<void>;
 }
@@ -99,6 +100,7 @@ export function createEnvironmentConnection(
   let disposed = false;
   const bootstrapGate = createBootstrapGate();
   let unsubEvents: () => void = NOOP;
+  let hasEventsSubscription = false;
 
   const observeEnvironmentIdentity = (nextEnvironmentId: EnvironmentId, source: string) => {
     if (environmentId !== nextEnvironmentId) {
@@ -135,9 +137,17 @@ export function createEnvironmentConnection(
     },
   );
 
-  const startOrchestrationSubscription = () => {
+  const startOrchestrationSubscription = (options?: { readonly replaceExisting?: boolean }) => {
     if (disposed) {
       return;
+    }
+    if (hasEventsSubscription) {
+      if (!options?.replaceExisting) {
+        return;
+      }
+      unsubEvents();
+      unsubEvents = NOOP;
+      hasEventsSubscription = false;
     }
 
     unsubEvents = input.client.orchestration.subscribeEvents(
@@ -165,11 +175,13 @@ export function createEnvironmentConnection(
         },
       },
     );
+    hasEventsSubscription = true;
   };
 
-  void Promise.resolve(input.hydrateCachedState?.(environmentId))
-    .catch(() => undefined)
-    .finally(startOrchestrationSubscription);
+  const hydrationPromise = Promise.resolve(input.hydrateCachedState?.(environmentId)).catch(
+    () => undefined,
+  );
+  void hydrationPromise.finally(startOrchestrationSubscription);
 
   const unsubTerminalEvent = input.client.terminal.onEvent(
     (event: Parameters<Parameters<WsRpcClient["terminal"]["onEvent"]>[0]>[0]) => {
@@ -180,6 +192,7 @@ export function createEnvironmentConnection(
   const cleanup = () => {
     disposed = true;
     unsubEvents();
+    hasEventsSubscription = false;
     unsubTerminalEvent();
     unsubLifecycle();
     unsubConfig();
@@ -191,6 +204,15 @@ export function createEnvironmentConnection(
     knownEnvironment: input.knownEnvironment,
     client: input.client,
     ensureBootstrapped: () => bootstrapGate.wait(),
+    refreshEvents: async () => {
+      if (disposed) {
+        throw new Error("Environment connection disposed");
+      }
+      await hydrationPromise;
+      resetBootstrap();
+      startOrchestrationSubscription({ replaceExisting: true });
+      await bootstrapGate.wait();
+    },
     reconnect: async () => {
       resetBootstrap();
       try {

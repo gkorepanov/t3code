@@ -158,6 +158,7 @@ describe("retainThreadDetailSubscription", () => {
       knownEnvironment: input.knownEnvironment,
       client: input.client,
       ensureBootstrapped: vi.fn(async () => undefined),
+      refreshEvents: vi.fn(async () => undefined),
       reconnect: vi.fn(async () => undefined),
       dispose: vi.fn(async () => undefined),
     }));

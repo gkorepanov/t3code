@@ -324,4 +324,39 @@ describe("createEnvironmentConnection", () => {
 
     await connection.dispose();
   });
+
+  it("refreshes event replay without reconnecting the transport", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, eventSubscribeCursors } = createTestClient();
+    let appliedSequence: number | null = 1;
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyDeltaEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      markCaughtUp: vi.fn(() => true),
+      readAppliedSequence: vi.fn(() => appliedSequence),
+      applyTerminalEvent: vi.fn(),
+    });
+
+    await connection.ensureBootstrapped();
+    appliedSequence = 7;
+    await connection.refreshEvents();
+
+    expect(client.reconnect).not.toHaveBeenCalled();
+    expect(eventSubscribeCursors).toEqual([1, 7]);
+
+    await connection.dispose();
+  });
 });
