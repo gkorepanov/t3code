@@ -18,6 +18,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
@@ -41,6 +42,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  type CollapsedTurnDetailsEntry,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
@@ -150,6 +152,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         completionDividerBeforeEntryId,
         isWorking,
         activeTurnStartedAt,
+        activeTurnInProgress,
+        activeTurnId: activeTurnId ?? null,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
       }),
@@ -158,6 +162,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       completionDividerBeforeEntryId,
       isWorking,
       activeTurnStartedAt,
+      activeTurnInProgress,
+      activeTurnId,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
     ],
@@ -295,6 +301,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
+      {row.kind === "turn-details" && (
+        <TurnDetailsSection collapsedEntries={row.collapsedEntries} />
+      )}
+
       {row.kind === "work" && <WorkGroupSection groupedEntries={row.groupedEntries} />}
 
       {row.kind === "message" &&
@@ -522,6 +532,98 @@ function LiveMessageMeta({
 // Extracted row sections — own their state / store subscriptions so changes
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
+
+const TurnDetailsSection = memo(function TurnDetailsSection({
+  collapsedEntries,
+}: {
+  collapsedEntries: CollapsedTurnDetailsEntry[];
+}) {
+  const ctx = use(TimelineRowCtx);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const assistantMessageCount = collapsedEntries.filter((entry) => entry.kind === "message").length;
+  const workEntryCount = collapsedEntries.length - assistantMessageCount;
+  const summary = formatTurnDetailsSummary(assistantMessageCount, workEntryCount);
+
+  return (
+    <div className="px-1 py-0.5">
+      <div className="overflow-hidden rounded-xl border border-border/55 bg-card/30 shadow-sm shadow-black/[0.02]">
+        <button
+          type="button"
+          className="group flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-150 hover:bg-muted/35"
+          aria-expanded={isExpanded}
+          onClick={() => setIsExpanded((value) => !value)}
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/65 text-muted-foreground/70">
+            <WrenchIcon className="size-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[11px] font-medium leading-4 text-foreground/78">
+              Agent work
+            </span>
+            <span className="block truncate text-[10px] leading-4 text-muted-foreground/55">
+              {summary}
+            </span>
+          </span>
+          <ChevronDownIcon
+            aria-hidden="true"
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground/55 transition-transform duration-150",
+              isExpanded ? "rotate-180" : null,
+            )}
+          />
+        </button>
+        {isExpanded && (
+          <div className="space-y-1.5 border-t border-border/45 px-2 py-2">
+            {collapsedEntries.map((entry) =>
+              entry.kind === "work" ? (
+                <SimpleWorkEntryRow
+                  key={`turn-detail-work:${entry.id}`}
+                  workEntry={entry.entry}
+                  workspaceRoot={ctx.workspaceRoot}
+                />
+              ) : (
+                <CollapsedAssistantMessage
+                  key={`turn-detail-message:${entry.id}`}
+                  entry={entry}
+                  environmentId={ctx.activeThreadEnvironmentId}
+                  cwd={ctx.markdownCwd}
+                  timestampFormat={ctx.timestampFormat}
+                />
+              ),
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+const CollapsedAssistantMessage = memo(function CollapsedAssistantMessage({
+  entry,
+  environmentId,
+  cwd,
+  timestampFormat,
+}: {
+  entry: Extract<CollapsedTurnDetailsEntry, { kind: "message" }>;
+  environmentId: EnvironmentId;
+  cwd: string | undefined;
+  timestampFormat: TimestampFormat;
+}) {
+  const text = entry.message.text || "(empty response)";
+
+  return (
+    <div className="rounded-lg border border-border/45 bg-background/55 px-3 py-2">
+      <div className="mb-1.5 flex items-center gap-2 text-[10px] text-muted-foreground/55">
+        <BotIcon className="size-3" />
+        <span className="font-medium text-muted-foreground/65">Assistant update</span>
+        <span className="ml-auto">{formatTimestamp(entry.createdAt, timestampFormat)}</span>
+      </div>
+      <div className="text-muted-foreground/85">
+        <ChatMarkdown text={text} cwd={cwd} environmentId={environmentId} isStreaming={false} />
+      </div>
+    </div>
+  );
+});
 
 /** Owns its own expand/collapse state so toggling re-renders only this row.
  *  State resets on unmount which is fine — work groups start collapsed. */
@@ -829,6 +931,19 @@ function formatMessageMeta(
 ): string {
   if (!duration) return formatTimestamp(createdAt, timestampFormat);
   return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
+}
+
+function formatTurnDetailsSummary(assistantMessageCount: number, workEntryCount: number): string {
+  const parts: string[] = [];
+  if (assistantMessageCount > 0) {
+    parts.push(
+      `${assistantMessageCount} assistant ${assistantMessageCount === 1 ? "message" : "messages"}`,
+    );
+  }
+  if (workEntryCount > 0) {
+    parts.push(`${workEntryCount} ${workEntryCount === 1 ? "tool call" : "tool calls"}`);
+  }
+  return parts.join(", ");
 }
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {

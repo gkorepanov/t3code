@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId } from "@t3tools/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { page } from "vitest/browser";
@@ -44,6 +44,15 @@ vi.mock("@legendapp/list/react", async () => {
   });
 
   return { LegendList };
+});
+
+vi.mock("../ChatMarkdown", async () => {
+  const React = await import("react");
+
+  return {
+    default: ({ text }: { text: string }) =>
+      React.createElement("div", { "data-testid": "chat-markdown" }, text),
+  };
 });
 
 import { MessagesTimeline } from "./MessagesTimeline";
@@ -153,6 +162,67 @@ describe("MessagesTimeline", () => {
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
       expect(scrollToEndSpy).toHaveBeenCalledWith({ animated: false });
       expect(requestAnimationFrameSpy).toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("shows collapsed tool calls after expanding agent work", async () => {
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        completionDividerBeforeEntryId="assistant-final-entry"
+        completionSummary="Worked for 12s"
+        timelineEntries={[
+          {
+            id: "user-entry",
+            kind: "message",
+            createdAt: "2026-04-13T12:00:00.000Z",
+            message: {
+              id: MessageId.make("user-1"),
+              role: "user",
+              text: "fix it",
+              createdAt: "2026-04-13T12:00:00.000Z",
+              streaming: false,
+            },
+          },
+          {
+            id: "assistant-final-entry",
+            kind: "message",
+            createdAt: "2026-04-13T12:00:10.000Z",
+            message: {
+              id: MessageId.make("assistant-final"),
+              role: "assistant",
+              text: "Done.",
+              turnId: "turn-1" as never,
+              createdAt: "2026-04-13T12:00:10.000Z",
+              completedAt: "2026-04-13T12:00:12.000Z",
+              streaming: false,
+            },
+          },
+          {
+            id: "work-entry-after-final",
+            kind: "work",
+            createdAt: "2026-04-13T12:00:13.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-04-13T12:00:13.000Z",
+              label: "Ran command",
+              command: "bun lint",
+              tone: "tool",
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      await expect.element(page.getByText("Done.")).toBeVisible();
+      await expect.element(page.getByText("Ran command - bun lint")).not.toBeInTheDocument();
+
+      await page.getByText("Agent work").click();
+
+      await expect.element(page.getByText("Ran command - bun lint")).toBeVisible();
     } finally {
       await screen.unmount();
     }

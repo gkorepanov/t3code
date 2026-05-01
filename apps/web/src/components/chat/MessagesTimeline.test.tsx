@@ -31,6 +31,15 @@ vi.mock("@legendapp/list/react", async () => {
   return { LegendList };
 });
 
+vi.mock("../ChatMarkdown", async () => {
+  const React = await import("react");
+
+  return {
+    default: ({ text }: { text: string }) =>
+      React.createElement("div", { "data-testid": "chat-markdown" }, text),
+  };
+});
+
 function matchMedia() {
   return {
     matches: false,
@@ -55,6 +64,9 @@ beforeAll(() => {
   });
   vi.stubGlobal("window", {
     matchMedia,
+    location: {
+      origin: "http://localhost",
+    },
     addEventListener: () => {},
     removeEventListener: () => {},
     requestAnimationFrame: (callback: FrameRequestCallback) => {
@@ -185,5 +197,75 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+  });
+
+  it("keeps final response visible while prior agent work starts collapsed", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        completionDividerBeforeEntryId="assistant-final-entry"
+        completionSummary="Worked for 12s"
+        timelineEntries={[
+          {
+            id: "user-entry",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: MessageId.make("user-1"),
+              role: "user",
+              text: "fix bug",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+            },
+          },
+          {
+            id: "assistant-note-entry",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:30.000Z",
+            message: {
+              id: MessageId.make("assistant-note"),
+              role: "assistant",
+              text: "I will inspect the broken path.",
+              turnId: "turn-1" as never,
+              createdAt: "2026-03-17T19:12:30.000Z",
+              completedAt: "2026-03-17T19:12:31.000Z",
+              streaming: false,
+            },
+          },
+          {
+            id: "work-entry",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:34.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:34.000Z",
+              label: "Ran command",
+              command: "bun lint",
+              tone: "tool",
+            },
+          },
+          {
+            id: "assistant-final-entry",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:40.000Z",
+            message: {
+              id: MessageId.make("assistant-final"),
+              role: "assistant",
+              text: "Final answer is visible.",
+              turnId: "turn-1" as never,
+              createdAt: "2026-03-17T19:12:40.000Z",
+              completedAt: "2026-03-17T19:12:41.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Agent work");
+    expect(markup).toContain("Final answer is visible.");
+    expect(markup).not.toContain("I will inspect the broken path.");
+    expect(markup).not.toContain("bun lint");
   });
 });

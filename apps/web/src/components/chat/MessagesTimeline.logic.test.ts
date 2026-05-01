@@ -261,11 +261,167 @@ describe("deriveMessagesTimelineRows", () => {
       (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
         row.kind === "message" && row.message.role === "assistant",
     );
+    const detailsRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "turn-details" }> =>
+        row.kind === "turn-details",
+    );
 
-    expect(assistantRows).toHaveLength(2);
-    expect(assistantRows[0]?.showAssistantCopyButton).toBe(false);
-    expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
-    expect(assistantRows[1]?.showCompletionDivider).toBe(true);
+    expect(detailsRow?.collapsedEntries.map((entry) => entry.id)).toEqual([
+      "assistant-thought-entry",
+    ]);
+    expect(assistantRows).toHaveLength(1);
+    expect(assistantRows[0]?.message.id).toBe("assistant-final");
+    expect(assistantRows[0]?.showAssistantCopyButton).toBe(true);
+    expect(assistantRows[0]?.showCompletionDivider).toBe(true);
+  });
+
+  it("collapses assistant work before the final response", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Fix it",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-note-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:05Z",
+          message: {
+            id: "assistant-note" as never,
+            role: "assistant",
+            text: "I will inspect the failing path.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:05Z",
+            completedAt: "2026-01-01T00:00:06Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:10Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:10Z",
+            label: "Ran command",
+            command: "bun lint",
+            tone: "tool",
+          },
+        },
+        {
+          id: "assistant-final-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-final" as never,
+            role: "assistant",
+            text: "Fixed.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            completedAt: "2026-01-01T00:00:22Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry-after-final",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:25Z",
+          entry: {
+            id: "work-2",
+            createdAt: "2026-01-01T00:00:25Z",
+            label: "Read file",
+            detail: "apps/web/src/components/chat/MessagesTimeline.tsx",
+            tone: "tool",
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: "assistant-final-entry",
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.kind)).toEqual(["message", "turn-details", "message"]);
+
+    const detailsRow = rows[1];
+    expect(detailsRow?.kind).toBe("turn-details");
+    if (detailsRow?.kind !== "turn-details") throw new Error("expected turn-details row");
+    expect(detailsRow.collapsedEntries.map((entry) => entry.id)).toEqual([
+      "assistant-note-entry",
+      "work-entry",
+      "work-entry-after-final",
+    ]);
+
+    const finalRow = rows[2];
+    expect(finalRow?.kind).toBe("message");
+    if (finalRow?.kind !== "message") throw new Error("expected final message row");
+    expect(finalRow.message.id).toBe("assistant-final");
+    expect(finalRow.showCompletionDivider).toBe(true);
+  });
+
+  it("does not collapse intermediate work while the same turn is still running", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Keep going",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:10Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:10Z",
+            label: "Ran command",
+            command: "bun lint",
+            tone: "tool",
+          },
+        },
+        {
+          id: "assistant-note-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-note" as never,
+            role: "assistant",
+            text: "Still checking.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            completedAt: "2026-01-01T00:00:21Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      activeTurnInProgress: true,
+      activeTurnId: "turn-1" as never,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.kind)).toEqual(["message", "work", "message", "working"]);
   });
 
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {
