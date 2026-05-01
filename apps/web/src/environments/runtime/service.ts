@@ -15,6 +15,7 @@ import { Throttler } from "@tanstack/react-pacer";
 import {
   createKnownEnvironment,
   getKnownEnvironmentWsBaseUrl,
+  parseScopedThreadKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
@@ -119,14 +120,6 @@ const pendingCachePersistByEnvironment = new Map<
   EnvironmentId,
   {
     shell: OrchestrationShellSnapshot | null;
-    threadDetailsByKey: Map<
-      string,
-      {
-        threadId: ThreadId;
-        sequence: number;
-        thread: Thread;
-      }
-    >;
     timeoutId: ReturnType<typeof setTimeout> | null;
   }
 >();
@@ -367,6 +360,35 @@ function getEventThreadId(event: OrchestrationEvent): ThreadId | null {
   return event.aggregateKind === "thread" ? (event.aggregateId as ThreadId) : null;
 }
 
+function collectCachedThreadDetailsForCheckpoint(
+  environmentId: EnvironmentId,
+  sequence: number,
+): Array<{ threadId: ThreadId; sequence: number; thread: Thread }> {
+  const state = useStore.getState();
+  const threadDetails: Array<{ threadId: ThreadId; sequence: number; thread: Thread }> = [];
+
+  for (const key of threadDetailVersionByKey.keys()) {
+    const threadRef = parseScopedThreadKey(key);
+    if (!threadRef || threadRef.environmentId !== environmentId) {
+      continue;
+    }
+
+    const thread = selectThreadByRef(state, threadRef);
+    if (!thread) {
+      clearThreadDetailVersion(environmentId, threadRef.threadId);
+      continue;
+    }
+
+    threadDetails.push({
+      threadId: threadRef.threadId,
+      sequence,
+      thread,
+    });
+  }
+
+  return threadDetails;
+}
+
 function flushPendingCachePersist(environmentId: EnvironmentId): void {
   const pending = pendingCachePersistByEnvironment.get(environmentId);
   if (!pending) {
@@ -387,7 +409,7 @@ function flushPendingCachePersist(environmentId: EnvironmentId): void {
   void persistCachedAppliedState({
     environmentId,
     shell,
-    threadDetails: [...pending.threadDetailsByKey.values()],
+    threadDetails: collectCachedThreadDetailsForCheckpoint(environmentId, shell.snapshotSequence),
   }).catch(() => undefined);
 }
 
@@ -430,29 +452,15 @@ function queueAppliedCachePersist(input: {
 
   const pending = pendingCachePersistByEnvironment.get(input.environmentId) ?? {
     shell: null,
-    threadDetailsByKey: new Map<string, { threadId: ThreadId; sequence: number; thread: Thread }>(),
     timeoutId: null,
   };
   pending.shell = shell;
-  if (thread && input.threadId) {
-    pending.threadDetailsByKey.set(
-      getThreadDetailSubscriptionKey(input.environmentId, input.threadId),
-      {
-        threadId: input.threadId,
-        sequence: input.sequence,
-        thread,
-      },
-    );
-  }
   pendingCachePersistByEnvironment.set(input.environmentId, pending);
   schedulePendingCachePersist(input.environmentId);
 }
 
 function deleteCachedThreadDetailState(environmentId: EnvironmentId, threadId: ThreadId): void {
   clearThreadDetailVersion(environmentId, threadId);
-  pendingCachePersistByEnvironment
-    .get(environmentId)
-    ?.threadDetailsByKey.delete(getThreadDetailSubscriptionKey(environmentId, threadId));
   void deleteCachedThreadDetail(environmentId, threadId).catch(() => undefined);
 }
 
@@ -1028,7 +1036,6 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 
 function resetThreadDetailCacheForEnvironment(environmentId: EnvironmentId): void {
   clearThreadDetailVersionsForEnvironment(environmentId);
-  pendingCachePersistByEnvironment.get(environmentId)?.threadDetailsByKey.clear();
   useStore.getState().clearEnvironmentThreadDetails(environmentId);
   void clearCachedThreadDetailsForEnvironment(environmentId).catch(() => undefined);
 
@@ -1102,7 +1109,7 @@ async function hydrateCachedEnvironmentState(environmentId: EnvironmentId): Prom
   for (const record of cachedState.threads) {
     if (
       !shellThreadIds.has(record.threadId) ||
-      record.sequence > cachedState.shell.snapshotSequence
+      record.sequence !== cachedState.shell.snapshotSequence
     ) {
       deleteCachedThreadDetailState(environmentId, record.threadId);
       continue;
@@ -1211,7 +1218,6 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
     updateCachedShellSnapshot(environmentId, item.event.sequence, item.shellEvent);
   }
 
-  const threadDetailPersistSequences = new Map<ThreadId, number>();
   for (const item of freshDeltaEvents) {
     const threadId = getEventThreadId(item.event);
     if (!threadId) {
@@ -1221,27 +1227,19 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
       deleteCachedThreadDetailState(environmentId, threadId);
       continue;
     }
-    if (readThreadDetailVersion(environmentId, threadId) !== null) {
-      markThreadDetailVersion(environmentId, threadId, item.event.sequence);
-      threadDetailPersistSequences.set(threadId, item.event.sequence);
-    }
   }
 
   const lastSequence = freshDeltaEvents[freshDeltaEvents.length - 1]!.event.sequence;
-  if (threadDetailPersistSequences.size === 0) {
-    queueAppliedCachePersist({
-      environmentId,
-      sequence: lastSequence,
-    });
-  } else {
-    for (const [threadId, sequence] of threadDetailPersistSequences) {
-      queueAppliedCachePersist({
-        environmentId,
-        sequence,
-        threadId,
-      });
+  for (const key of threadDetailVersionByKey.keys()) {
+    const threadRef = parseScopedThreadKey(key);
+    if (threadRef?.environmentId === environmentId) {
+      markThreadDetailVersion(environmentId, threadRef.threadId, lastSequence);
     }
   }
+  queueAppliedCachePersist({
+    environmentId,
+    sequence: lastSequence,
+  });
   markAppliedProjectionEvent(environmentId, lastSequence);
 }
 
@@ -1743,7 +1741,12 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
 export async function resetEnvironmentServiceForTests(): Promise<void> {
   stopActiveService();
   lastAppliedProjectionVersionByEnvironment.clear();
+  cachedShellSnapshotByEnvironment.clear();
+  threadDetailVersionByKey.clear();
   pendingDeltaReplayByEnvironment.clear();
+  pendingDeltaApplyByEnvironment.clear();
+  pendingCachePersistByEnvironment.clear();
+  lastCachePersistAtByEnvironment.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);
   }

@@ -7,7 +7,8 @@ const ENVIRONMENT_STORE = "environments";
 const THREAD_STORE = "threads";
 const THREAD_ENVIRONMENT_INDEX = "byEnvironmentId";
 const THREAD_LAST_ACCESSED_INDEX = "byLastAccessedAtMs";
-const RECORD_VERSION = 1;
+// Bump when cache invariants change; older records are ignored on hydration.
+const RECORD_VERSION = 2;
 
 const MAX_THREAD_CACHE_BYTES = 200 * 1024 * 1024;
 const MAX_THREAD_CACHE_COUNT = 200;
@@ -204,14 +205,15 @@ async function enforceThreadCacheBudget(db: IDBDatabase): Promise<void> {
 async function putEnvironmentShellIfNewer(
   store: IDBObjectStore,
   record: CachedEnvironmentShellRecord,
-): Promise<void> {
+): Promise<boolean> {
   const existing = (await requestToPromise(store.get(record.environmentId))) as
     | CachedEnvironmentShellRecord
     | undefined;
   if (existing && existing.version === RECORD_VERSION && existing.sequence > record.sequence) {
-    return;
+    return false;
   }
   store.put(record);
+  return true;
 }
 
 async function putThreadDetailIfNewer(
@@ -267,24 +269,41 @@ export async function persistCachedAppliedState(input: PersistAppliedStateInput)
       thread: threadDetail.thread,
     }),
   );
-  const oversizedThreadRecords = threadRecords.filter(
-    (record) => record.sizeBytes > MAX_THREAD_CACHE_BYTES,
-  );
-  for (const record of oversizedThreadRecords) {
-    await deleteCachedThreadDetail(input.environmentId, record.threadId);
-  }
   const storableThreadRecords = threadRecords.filter(
     (record) => record.sizeBytes <= MAX_THREAD_CACHE_BYTES,
+  );
+  const storableThreadRecordsByKey = new Map(
+    storableThreadRecords.map((record) => [record.key, record] as const),
   );
 
   const transaction = db.transaction([ENVIRONMENT_STORE, THREAD_STORE], "readwrite");
   const done = transactionDone(transaction);
-  if (shellRecord) {
-    await putEnvironmentShellIfNewer(transaction.objectStore(ENVIRONMENT_STORE), shellRecord);
-  }
   const threadStore = transaction.objectStore(THREAD_STORE);
-  for (const threadRecord of storableThreadRecords) {
-    await putThreadDetailIfNewer(threadStore, threadRecord);
+  const shellWritten = shellRecord
+    ? await putEnvironmentShellIfNewer(transaction.objectStore(ENVIRONMENT_STORE), shellRecord)
+    : false;
+
+  if (shellRecord && shellWritten) {
+    const existingThreadRecords = (await requestToPromise(
+      threadStore.index(THREAD_ENVIRONMENT_INDEX).getAll(input.environmentId),
+    )) as CachedThreadDetailRecord[];
+
+    for (const existingRecord of existingThreadRecords) {
+      const nextRecord = storableThreadRecordsByKey.get(existingRecord.key);
+      if (!nextRecord || nextRecord.sequence !== shellRecord.sequence) {
+        threadStore.delete(existingRecord.key);
+      }
+    }
+
+    for (const threadRecord of storableThreadRecords) {
+      if (threadRecord.sequence === shellRecord.sequence) {
+        threadStore.put(threadRecord);
+      }
+    }
+  } else if (!shellRecord) {
+    for (const threadRecord of storableThreadRecords) {
+      await putThreadDetailIfNewer(threadStore, threadRecord);
+    }
   }
   await done;
 

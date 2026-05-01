@@ -1,9 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
   EnvironmentId,
+  MessageId,
   ProjectId,
   ThreadId,
   TurnId,
+  type OrchestrationThread,
   type OrchestrationShellSnapshot,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +17,9 @@ const mockCreateWsRpcClient = vi.fn();
 const mockWaitForSavedEnvironmentRegistryHydration = vi.fn();
 const mockListSavedEnvironmentRecords = vi.fn();
 const mockSavedEnvironmentRegistrySubscribe = vi.fn();
+const mockPersistCachedAppliedState = vi.fn();
+const mockReadCachedEnvironmentState = vi.fn();
+const mockDeleteCachedThreadDetail = vi.fn();
 
 function MockWsTransport() {
   return undefined;
@@ -69,6 +74,14 @@ vi.mock("../../rpc/wsRpcClient", () => ({
 
 vi.mock("../../rpc/wsTransport", () => ({
   WsTransport: MockWsTransport,
+}));
+
+vi.mock("./orchestrationStateCache", () => ({
+  clearCachedThreadDetailsForEnvironment: vi.fn(async () => undefined),
+  deleteCachedThreadDetail: mockDeleteCachedThreadDetail,
+  persistCachedAppliedState: mockPersistCachedAppliedState,
+  readCachedEnvironmentState: mockReadCachedEnvironmentState,
+  touchCachedThreadDetail: vi.fn(async () => undefined),
 }));
 
 function makeThreadShellSnapshot(params: {
@@ -139,6 +152,28 @@ function makeThreadShellSnapshot(params: {
   };
 }
 
+function makeThreadDetail(threadId: ThreadId): OrchestrationThread {
+  const shell = makeThreadShellSnapshot({ threadId }).threads[0]!;
+  return {
+    ...shell,
+    deletedAt: null,
+    messages: [
+      {
+        id: MessageId.make("message-1"),
+        role: "assistant",
+        text: "hello",
+        turnId: null,
+        streaming: false,
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ],
+    proposedPlans: [],
+    activities: [],
+    checkpoints: [],
+  };
+}
+
 describe("retainThreadDetailSubscription", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -147,6 +182,9 @@ describe("retainThreadDetailSubscription", () => {
 
     mockThreadUnsubscribe.mockImplementation(() => undefined);
     mockSubscribeThread.mockImplementation(() => mockThreadUnsubscribe);
+    mockDeleteCachedThreadDetail.mockResolvedValue(undefined);
+    mockPersistCachedAppliedState.mockResolvedValue(undefined);
+    mockReadCachedEnvironmentState.mockResolvedValue({ shell: null, threads: [] });
     mockCreateWsRpcClient.mockReturnValue({
       orchestration: {
         subscribeThread: mockSubscribeThread,
@@ -295,5 +333,119 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
 
     stop();
+  });
+
+  it("persists cached thread details at the same checkpoint as the shell", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    let threadListener:
+      | ((item: {
+          kind: "snapshot";
+          snapshot: { snapshotSequence: number; thread: OrchestrationThread };
+        }) => void)
+      | undefined;
+    mockSubscribeThread.mockImplementation((_input, listener) => {
+      threadListener = listener;
+      return mockThreadUnsubscribe;
+    });
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-cached");
+    const projectId = ProjectId.make("project-1");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(makeThreadShellSnapshot({ threadId }), environmentId);
+    mockPersistCachedAppliedState.mockClear();
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const emitThreadSnapshot = threadListener;
+    expect(emitThreadSnapshot).toBeDefined();
+    emitThreadSnapshot!({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 1,
+        thread: makeThreadDetail(threadId),
+      },
+    });
+
+    connectionInput.applyShellEvent(
+      {
+        kind: "project-upserted",
+        sequence: 2,
+        project: {
+          id: projectId,
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-04-13T00:00:00.000Z",
+          updatedAt: "2026-04-13T00:00:01.000Z",
+        },
+      },
+      environmentId,
+    );
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(mockPersistCachedAppliedState).toHaveBeenLastCalledWith({
+      environmentId,
+      shell: expect.objectContaining({ snapshotSequence: 2 }),
+      threadDetails: [
+        expect.objectContaining({
+          threadId,
+          sequence: 2,
+          thread: expect.objectContaining({ id: threadId }),
+        }),
+      ],
+    });
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("evicts stale cached thread details during hydration", async () => {
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-stale");
+    const shell = {
+      ...makeThreadShellSnapshot({ threadId }),
+      snapshotSequence: 2,
+    };
+    mockReadCachedEnvironmentState.mockResolvedValueOnce({
+      shell,
+      threads: [
+        {
+          version: 1,
+          key: "env-1\u0000thread-stale",
+          environmentId,
+          threadId,
+          sequence: 1,
+          thread: makeThreadDetail(threadId),
+          updatedAtMs: 1,
+          lastAccessedAtMs: 1,
+          sizeBytes: 1,
+        },
+      ],
+    });
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    await connectionInput.hydrateCachedState(environmentId);
+
+    expect(mockDeleteCachedThreadDetail).toHaveBeenCalledWith(environmentId, threadId);
+
+    stop();
+    await resetEnvironmentServiceForTests();
   });
 });
