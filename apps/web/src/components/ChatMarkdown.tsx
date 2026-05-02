@@ -19,7 +19,9 @@ import React, {
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -80,6 +82,83 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
+
+function countRepeatedCharacter(text: string, start: number, character: string): number {
+  let count = 0;
+  while (text[start + count] === character) {
+    count += 1;
+  }
+  return count;
+}
+
+function isMarkdownFenceStart(text: string, start: number, markerLength: number): boolean {
+  if (markerLength < 3) return false;
+  const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+  const prefix = text.slice(lineStart, start);
+  return prefix.length <= 3 && prefix.trim().length === 0;
+}
+
+function findClosingMarker(
+  text: string,
+  start: number,
+  markerCharacter: string,
+  markerLength: number,
+): number {
+  return text.indexOf(markerCharacter.repeat(markerLength), start);
+}
+
+function normalizeLatexMathDelimiters(text: string): string {
+  if (!text.includes("\\(") && !text.includes("\\[")) return text;
+
+  let normalized = "";
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text[index];
+
+    if (character === "`" || character === "~") {
+      const markerLength = countRepeatedCharacter(text, index, character);
+      const isFence = isMarkdownFenceStart(text, index, markerLength);
+      if (character === "`" || isFence) {
+        const markerEnd = index + markerLength;
+        const closingIndex = findClosingMarker(text, markerEnd, character, markerLength);
+        if (closingIndex >= 0) {
+          const closingEnd = closingIndex + markerLength;
+          normalized += text.slice(index, closingEnd);
+          index = closingEnd;
+          continue;
+        }
+        if (isFence) {
+          normalized += text.slice(index);
+          break;
+        }
+      }
+    }
+
+    if (text.startsWith("\\(", index)) {
+      const closingIndex = text.indexOf("\\)", index + 2);
+      if (closingIndex >= 0) {
+        normalized += `$${text.slice(index + 2, closingIndex)}$`;
+        index = closingIndex + 2;
+        continue;
+      }
+    }
+
+    if (text.startsWith("\\[", index)) {
+      const closingIndex = text.indexOf("\\]", index + 2);
+      if (closingIndex >= 0) {
+        normalized += `\n\n$$\n${text.slice(index + 2, closingIndex)}\n$$\n\n`;
+        index = closingIndex + 2;
+        continue;
+      }
+    }
+
+    normalized += character;
+    index += 1;
+  }
+
+  return normalized;
+}
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
@@ -618,6 +697,7 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
   );
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const normalizedText = useMemo(() => normalizeLatexMathDelimiters(text), [text]);
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
@@ -750,11 +830,12 @@ function ChatMarkdown({ text, cwd, environmentId, isStreaming = false }: ChatMar
     <>
       <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: true }]]}
+          rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
           components={markdownComponents}
           urlTransform={markdownUrlTransform}
         >
-          {text}
+          {normalizedText}
         </ReactMarkdown>
       </div>
       <ChatMarkdownFilePreviewDialog

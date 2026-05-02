@@ -178,6 +178,37 @@ describe("ChatMarkdown", () => {
     }
   });
 
+  it("renders LaTeX math with KaTeX", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text={[
+          "Inline $E=mc^2$ and bracketed \\(a^2 + b^2 = c^2\\).",
+          "",
+          "$$",
+          "\\int_0^1 x^2\\,dx",
+          "$$",
+          "",
+          "\\[\\frac{1}{2}\\]",
+          "",
+          "`\\(not math\\)`",
+        ].join("\n")}
+        cwd="/repo/project"
+      />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelectorAll(".chat-markdown .katex").length).toBeGreaterThanOrEqual(4);
+        expect(
+          document.querySelectorAll(".chat-markdown .katex-display").length,
+        ).toBeGreaterThanOrEqual(2);
+      });
+      expect(document.querySelector(".chat-markdown code")?.textContent).toBe("\\(not math\\)");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("loads saved remote markdown images through authenticated fetch", async () => {
     const environmentId = EnvironmentId.make("environment-remote");
     const filePath = "/home/gkorepanov/tmp/experiments/2026_04_24_sine_plot/outputs/sine.png";
