@@ -538,15 +538,17 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
   }
 
   if (readThreadDetailVersion(entry.environmentId, entry.threadId) !== null) {
-    entry.unsubscribe = () => undefined;
     void touchCachedThreadDetail(entry.environmentId, entry.threadId).catch(() => undefined);
-    return true;
   }
 
   entry.unsubscribe = connection.client.orchestration.subscribeThread(
     { threadId: entry.threadId },
     (item) => {
       if (item.kind === "snapshot") {
+        const currentVersion = readThreadDetailVersion(entry.environmentId, entry.threadId);
+        if (currentVersion !== null && item.snapshot.snapshotSequence < currentVersion) {
+          return;
+        }
         useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
         markThreadDetailVersion(
           entry.environmentId,

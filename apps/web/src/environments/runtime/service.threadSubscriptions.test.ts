@@ -20,6 +20,7 @@ const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockPersistCachedAppliedState = vi.fn();
 const mockReadCachedEnvironmentState = vi.fn();
 const mockDeleteCachedThreadDetail = vi.fn();
+const mockTouchCachedThreadDetail = vi.fn();
 
 function MockWsTransport() {
   return undefined;
@@ -81,7 +82,7 @@ vi.mock("./orchestrationStateCache", () => ({
   deleteCachedThreadDetail: mockDeleteCachedThreadDetail,
   persistCachedAppliedState: mockPersistCachedAppliedState,
   readCachedEnvironmentState: mockReadCachedEnvironmentState,
-  touchCachedThreadDetail: vi.fn(async () => undefined),
+  touchCachedThreadDetail: mockTouchCachedThreadDetail,
 }));
 
 function makeThreadShellSnapshot(params: {
@@ -185,6 +186,7 @@ describe("retainThreadDetailSubscription", () => {
     mockDeleteCachedThreadDetail.mockResolvedValue(undefined);
     mockPersistCachedAppliedState.mockResolvedValue(undefined);
     mockReadCachedEnvironmentState.mockResolvedValue({ shell: null, threads: [] });
+    mockTouchCachedThreadDetail.mockResolvedValue(undefined);
     mockCreateWsRpcClient.mockReturnValue({
       orchestration: {
         subscribeThread: mockSubscribeThread,
@@ -445,6 +447,98 @@ describe("retainThreadDetailSubscription", () => {
 
     expect(mockDeleteCachedThreadDetail).toHaveBeenCalledWith(environmentId, threadId);
 
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("refreshes retained cached thread details from the server snapshot", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    let threadListener:
+      | ((item: {
+          kind: "snapshot";
+          snapshot: { snapshotSequence: number; thread: OrchestrationThread };
+        }) => void)
+      | undefined;
+    mockSubscribeThread.mockImplementation((_input, listener) => {
+      threadListener = listener;
+      return mockThreadUnsubscribe;
+    });
+
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-cached-refresh");
+    const shell = {
+      ...makeThreadShellSnapshot({ threadId }),
+      snapshotSequence: 5,
+    };
+    const cachedThreadBase = makeThreadDetail(threadId);
+    const cachedThread: OrchestrationThread = {
+      ...cachedThreadBase,
+      messages: [
+        {
+          ...cachedThreadBase.messages[0]!,
+          text: "tail only",
+        },
+      ],
+    };
+    const freshThread = makeThreadDetail(threadId);
+    mockReadCachedEnvironmentState.mockResolvedValueOnce({
+      shell,
+      threads: [
+        {
+          version: 1,
+          key: "env-1\u0000thread-cached-refresh",
+          environmentId,
+          threadId,
+          sequence: 5,
+          thread: cachedThread,
+          updatedAtMs: 1,
+          lastAccessedAtMs: 1,
+          sizeBytes: 1,
+        },
+      ],
+    });
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    await connectionInput.hydrateCachedState(environmentId);
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+
+    expect(mockTouchCachedThreadDetail).toHaveBeenCalledWith(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledWith({ threadId }, expect.any(Function));
+    expect(threadListener).toBeDefined();
+
+    threadListener!({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 5,
+        thread: freshThread,
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(mockPersistCachedAppliedState).toHaveBeenLastCalledWith({
+      environmentId,
+      shell: expect.objectContaining({ snapshotSequence: 5 }),
+      threadDetails: [
+        expect.objectContaining({
+          threadId,
+          sequence: 5,
+          thread: expect.objectContaining({
+            messages: [expect.objectContaining({ text: "hello" })],
+          }),
+        }),
+      ],
+    });
+
+    release();
     stop();
     await resetEnvironmentServiceForTests();
   });
