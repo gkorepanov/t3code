@@ -1,10 +1,12 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
   EnvironmentId,
+  EventId,
   MessageId,
   ProjectId,
   ThreadId,
   TurnId,
+  type OrchestrationEvent,
   type OrchestrationThread,
   type OrchestrationShellSnapshot,
 } from "@t3tools/contracts";
@@ -172,6 +174,38 @@ function makeThreadDetail(threadId: ThreadId): OrchestrationThread {
     proposedPlans: [],
     activities: [],
     checkpoints: [],
+  };
+}
+
+function makeThreadMessageSentEvent(params: {
+  readonly sequence: number;
+  readonly threadId: ThreadId;
+  readonly messageId: MessageId;
+  readonly text: string;
+  readonly streaming: boolean;
+}): OrchestrationEvent {
+  const timestamp = "2026-04-13T00:00:01.000Z";
+  return {
+    sequence: params.sequence,
+    eventId: EventId.make(`event-${params.sequence}`),
+    aggregateKind: "thread",
+    aggregateId: params.threadId,
+    occurredAt: timestamp,
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.message-sent",
+    payload: {
+      threadId: params.threadId,
+      messageId: params.messageId,
+      role: "assistant",
+      text: params.text,
+      turnId: TurnId.make("turn-1"),
+      streaming: params.streaming,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
   };
 }
 
@@ -537,6 +571,108 @@ describe("retainThreadDetailSubscription", () => {
         }),
       ],
     });
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not materialize a tail-only assistant message when replay starts mid-stream before thread snapshot", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { useStore } = await import("~/store");
+
+    let threadListener:
+      | ((
+          item:
+            | {
+                kind: "snapshot";
+                snapshot: { snapshotSequence: number; thread: OrchestrationThread };
+              }
+            | {
+                kind: "event";
+                event: OrchestrationEvent;
+              },
+        ) => void)
+      | undefined;
+    mockSubscribeThread.mockImplementation((_input, listener) => {
+      threadListener = listener;
+      return mockThreadUnsubscribe;
+    });
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-global-delta-race");
+    const messageId = MessageId.make("assistant-racing-message");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(makeThreadShellSnapshot({ threadId }), environmentId);
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+
+    connectionInput.applyDeltaEvent(
+      {
+        kind: "event",
+        event: makeThreadMessageSentEvent({
+          sequence: 2,
+          threadId,
+          messageId,
+          text: "(`~425px`) до нормальной",
+          streaming: true,
+        }),
+      },
+      environmentId,
+    );
+    await vi.advanceTimersByTimeAsync(50);
+
+    const racedState = useStore.getState().environmentStateById[environmentId];
+    expect(racedState?.messageByThreadId[threadId]?.[messageId]).toBeUndefined();
+
+    const fullThread: OrchestrationThread = {
+      ...makeThreadDetail(threadId),
+      messages: [
+        {
+          ...makeThreadDetail(threadId).messages[0]!,
+          id: messageId,
+          text: "После правки body поднялся с середины (`~425px`) до нормальной позиции.",
+          turnId: TurnId.make("turn-1"),
+          streaming: true,
+        },
+      ],
+    };
+
+    expect(threadListener).toBeDefined();
+    threadListener!({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 2,
+        thread: fullThread,
+      },
+    });
+
+    const hydratedState = useStore.getState().environmentStateById[environmentId];
+    expect(hydratedState?.messageByThreadId[threadId]?.[messageId]?.text).toBe(
+      "После правки body поднялся с середины (`~425px`) до нормальной позиции.",
+    );
+
+    threadListener!({
+      kind: "event",
+      event: makeThreadMessageSentEvent({
+        sequence: 3,
+        threadId,
+        messageId,
+        text: " Ещё быстро проверю Raw view.",
+        streaming: true,
+      }),
+    });
+
+    const liveState = useStore.getState().environmentStateById[environmentId];
+    expect(liveState?.messageByThreadId[threadId]?.[messageId]?.text).toBe(
+      "После правки body поднялся с середины (`~425px`) до нормальной позиции. Ещё быстро проверю Raw view.",
+    );
 
     release();
     stop();

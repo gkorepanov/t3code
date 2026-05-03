@@ -123,6 +123,7 @@ const pendingCachePersistByEnvironment = new Map<
     timeoutId: ReturnType<typeof setTimeout> | null;
   }
 >();
+const pendingThreadDetailEventsByKey = new Map<string, OrchestrationEvent[]>();
 const lastCachePersistAtByEnvironment = new Map<EnvironmentId, number>();
 
 let activeService: EnvironmentServiceState | null = null;
@@ -284,13 +285,20 @@ function markThreadDetailVersion(
 }
 
 function clearThreadDetailVersion(environmentId: EnvironmentId, threadId: ThreadId): void {
-  threadDetailVersionByKey.delete(getThreadDetailSubscriptionKey(environmentId, threadId));
+  const key = getThreadDetailSubscriptionKey(environmentId, threadId);
+  threadDetailVersionByKey.delete(key);
+  pendingThreadDetailEventsByKey.delete(key);
 }
 
 function clearThreadDetailVersionsForEnvironment(environmentId: EnvironmentId): void {
   for (const key of threadDetailVersionByKey.keys()) {
     if (key.startsWith(`${environmentId}:`)) {
       threadDetailVersionByKey.delete(key);
+    }
+  }
+  for (const key of pendingThreadDetailEventsByKey.keys()) {
+    if (key.startsWith(`${environmentId}:`)) {
+      pendingThreadDetailEventsByKey.delete(key);
     }
   }
 }
@@ -358,6 +366,17 @@ function updateCachedShellSnapshot(
 
 function getEventThreadId(event: OrchestrationEvent): ThreadId | null {
   return event.aggregateKind === "thread" ? (event.aggregateId as ThreadId) : null;
+}
+
+function isThreadDetailDeltaEvent(event: OrchestrationEvent): boolean {
+  return (
+    event.type === "thread.message-sent" ||
+    event.type === "thread.proposed-plan-upserted" ||
+    event.type === "thread.activity-appended" ||
+    event.type === "thread.turn-diff-completed" ||
+    event.type === "thread.reverted" ||
+    event.type === "thread.session-set"
+  );
 }
 
 function collectCachedThreadDetailsForCheckpoint(
@@ -555,9 +574,34 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
           entry.threadId,
           item.snapshot.snapshotSequence,
         );
+        drainPendingThreadDetailEvents(
+          entry.environmentId,
+          entry.threadId,
+          item.snapshot.snapshotSequence,
+        );
         queueAppliedCachePersist({
           environmentId: entry.environmentId,
           sequence: item.snapshot.snapshotSequence,
+          threadId: entry.threadId,
+        });
+        return;
+      }
+
+      if (item.kind === "event") {
+        const currentVersion = readThreadDetailVersion(entry.environmentId, entry.threadId);
+        if (currentVersion === null) {
+          queuePendingThreadDetailEvent(entry.environmentId, item.event);
+          return;
+        }
+        if (item.event.sequence <= currentVersion) {
+          return;
+        }
+
+        applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+        markThreadDetailVersion(entry.environmentId, entry.threadId, item.event.sequence);
+        queueAppliedCachePersist({
+          environmentId: entry.environmentId,
+          sequence: item.event.sequence,
           threadId: entry.threadId,
         });
       }
@@ -1144,6 +1188,72 @@ function flattenDeltaApplyItems(items: ReadonlyArray<DeltaApplyItem>): DeltaEven
   );
 }
 
+function queuePendingThreadDetailEvent(environmentId: EnvironmentId, event: OrchestrationEvent) {
+  const threadId = getEventThreadId(event);
+  if (!threadId) {
+    return;
+  }
+
+  const key = getThreadDetailSubscriptionKey(environmentId, threadId);
+  const pending = pendingThreadDetailEventsByKey.get(key) ?? [];
+  if (pending.some((entry) => entry.sequence === event.sequence)) {
+    return;
+  }
+  pendingThreadDetailEventsByKey.set(key, [...pending, event]);
+}
+
+function drainPendingThreadDetailEvents(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  afterSequence: number,
+) {
+  const key = getThreadDetailSubscriptionKey(environmentId, threadId);
+  const pending = pendingThreadDetailEventsByKey.get(key);
+  if (!pending) {
+    return;
+  }
+
+  pendingThreadDetailEventsByKey.delete(key);
+  const freshEvents = pending
+    .filter((event) => event.sequence > afterSequence)
+    .toSorted((left, right) => left.sequence - right.sequence);
+  if (freshEvents.length === 0) {
+    return;
+  }
+
+  applyRecoveredEventBatch(freshEvents, environmentId);
+
+  const lastSequence = freshEvents[freshEvents.length - 1]!.sequence;
+  markThreadDetailVersion(environmentId, threadId, lastSequence);
+  queueAppliedCachePersist({
+    environmentId,
+    sequence: lastSequence,
+    threadId,
+  });
+}
+
+function shouldApplyGlobalDeltaEventToDetail(
+  event: OrchestrationEvent,
+  environmentId: EnvironmentId,
+) {
+  const threadId = getEventThreadId(event);
+  if (!threadId || !isThreadDetailDeltaEvent(event)) {
+    return true;
+  }
+
+  const hasRetainedThreadDetail = threadDetailSubscriptions.has(
+    getThreadDetailSubscriptionKey(environmentId, threadId),
+  );
+  if (!hasRetainedThreadDetail) {
+    return true;
+  }
+
+  if (readThreadDetailVersion(environmentId, threadId) === null) {
+    queuePendingThreadDetailEvent(environmentId, event);
+  }
+  return false;
+}
+
 function flushPendingDeltaEvents(environmentId: EnvironmentId): void {
   const pending = pendingDeltaApplyByEnvironment.get(environmentId);
   if (!pending) {
@@ -1209,7 +1319,9 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
   }
 
   applyRecoveredEventBatch(
-    freshDeltaEvents.map((deltaEvent) => deltaEvent.event),
+    freshDeltaEvents
+      .map((deltaEvent) => deltaEvent.event)
+      .filter((event) => shouldApplyGlobalDeltaEventToDetail(event, environmentId)),
     environmentId,
   );
 
@@ -1234,7 +1346,10 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
   const lastSequence = freshDeltaEvents[freshDeltaEvents.length - 1]!.event.sequence;
   for (const key of threadDetailVersionByKey.keys()) {
     const threadRef = parseScopedThreadKey(key);
-    if (threadRef?.environmentId === environmentId) {
+    if (
+      threadRef?.environmentId === environmentId &&
+      readThreadDetailVersion(environmentId, threadRef.threadId) !== null
+    ) {
       markThreadDetailVersion(environmentId, threadRef.threadId, lastSequence);
     }
   }
@@ -1748,6 +1863,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   pendingDeltaReplayByEnvironment.clear();
   pendingDeltaApplyByEnvironment.clear();
   pendingCachePersistByEnvironment.clear();
+  pendingThreadDetailEventsByKey.clear();
   lastCachePersistAtByEnvironment.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);
