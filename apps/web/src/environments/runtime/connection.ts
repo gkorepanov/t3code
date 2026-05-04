@@ -46,6 +46,22 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
 }
 
 const NOOP = () => undefined;
+const RECONNECT_BOOTSTRAP_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  });
+}
 
 function createBootstrapGate() {
   type BootstrapGateStatus = "ready" | "reset";
@@ -219,7 +235,11 @@ export function createEnvironmentConnection(
         await input.client.reconnect();
         await input.refreshMetadata?.();
         startOrchestrationSubscription({ replaceExisting: true });
-        await bootstrapGate.wait();
+        await withTimeout(
+          bootstrapGate.wait(),
+          RECONNECT_BOOTSTRAP_TIMEOUT_MS,
+          "Timed out waiting for orchestration delta replay after reconnect.",
+        );
       } catch (error) {
         bootstrapGate.reject(error);
         throw error;

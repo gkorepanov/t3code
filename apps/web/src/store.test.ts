@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  applyShellEvent,
   selectEnvironmentState,
   selectHasRunningAgentTurn,
   selectProjectsAcrossEnvironments,
@@ -490,6 +491,142 @@ describe("incremental orchestration updates", () => {
     expect(nextAfterThreadDelete).toBe(state);
   });
 
+  it("clears thread detail cache when a thread is archived", () => {
+    const thread = makeThread({
+      session: {
+        provider: "codex",
+        status: "running",
+        orchestrationStatus: "running",
+        activeTurnId: TurnId.make("turn-1"),
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: "2026-02-27T00:00:00.000Z",
+      },
+      latestTurn: {
+        turnId: TurnId.make("turn-1"),
+        state: "running",
+        requestedAt: "2026-02-27T00:00:00.000Z",
+        startedAt: "2026-02-27T00:00:00.000Z",
+        completedAt: null,
+        assistantMessageId: null,
+      },
+      messages: [
+        {
+          id: MessageId.make("message-1"),
+          role: "assistant",
+          text: "OK",
+          createdAt: "2026-02-27T00:00:01.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.archived", {
+        threadId: thread.id,
+        archivedAt: "2026-02-27T00:00:02.000Z",
+        updatedAt: "2026-02-27T00:00:02.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    const nextEnvironmentState = localEnvironmentStateOf(next);
+    expect(nextEnvironmentState.threadShellById[thread.id]?.archivedAt).toBe(
+      "2026-02-27T00:00:02.000Z",
+    );
+    expect(nextEnvironmentState.threadSessionById[thread.id]).toBeNull();
+    expect(nextEnvironmentState.threadTurnStateById[thread.id]).toEqual({ latestTurn: null });
+    expect(nextEnvironmentState.messageIdsByThreadId[thread.id]).toBeUndefined();
+    expect(nextEnvironmentState.messageByThreadId[thread.id]).toBeUndefined();
+    expect(threadsOf(next)[0]?.messages).toEqual([]);
+
+    const afterLateSession = applyOrchestrationEvent(
+      next,
+      makeEvent(
+        "thread.session-set",
+        {
+          threadId: thread.id,
+          session: {
+            threadId: thread.id,
+            status: "stopped",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-27T00:00:03.000Z",
+          },
+        },
+        { sequence: 2 },
+      ),
+      localEnvironmentId,
+    );
+    expect(localEnvironmentStateOf(afterLateSession).threadSessionById[thread.id]).toBeNull();
+
+    const afterLateStopRequested = applyOrchestrationEvent(
+      afterLateSession,
+      makeEvent(
+        "thread.session-stop-requested",
+        {
+          threadId: thread.id,
+          createdAt: "2026-02-27T00:00:04.000Z",
+        },
+        { sequence: 3 },
+      ),
+      localEnvironmentId,
+    );
+    expect(localEnvironmentStateOf(afterLateStopRequested).threadSessionById[thread.id]).toBeNull();
+
+    const afterLateShell = applyShellEvent(
+      afterLateStopRequested,
+      {
+        kind: "thread-upserted",
+        sequence: 4,
+        thread: {
+          id: thread.id,
+          projectId: thread.projectId,
+          title: thread.title,
+          modelSelection: thread.modelSelection,
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+          latestTurn: {
+            turnId: TurnId.make("turn-1"),
+            state: "completed",
+            requestedAt: "2026-02-27T00:00:00.000Z",
+            startedAt: "2026-02-27T00:00:00.000Z",
+            completedAt: "2026-02-27T00:00:05.000Z",
+            assistantMessageId: null,
+          },
+          createdAt: thread.createdAt,
+          updatedAt: "2026-02-27T00:00:05.000Z",
+          archivedAt: "2026-02-27T00:00:02.000Z",
+          session: {
+            threadId: thread.id,
+            status: "stopped",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-27T00:00:05.000Z",
+          },
+          latestUserMessageAt: "2026-02-27T00:00:01.000Z",
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        },
+      },
+      localEnvironmentId,
+    );
+    const afterLateShellEnvironmentState = localEnvironmentStateOf(afterLateShell);
+    expect(afterLateShellEnvironmentState.threadSessionById[thread.id]).toBeNull();
+    expect(afterLateShellEnvironmentState.threadTurnStateById[thread.id]).toEqual({
+      latestTurn: null,
+    });
+    expect(afterLateShellEnvironmentState.messageIdsByThreadId[thread.id]).toBeUndefined();
+  });
+
   it("reuses an existing project row when project.created arrives with a new id for the same cwd", () => {
     const originalProjectId = ProjectId.make("project-1");
     const recreatedProjectId = ProjectId.make("project-2");
@@ -783,6 +920,45 @@ describe("incremental orchestration updates", () => {
     expect(threadsOf(next)[0]?.session?.status).toBe("running");
     expect(threadsOf(next)[0]?.latestTurn?.state).toBe("completed");
     expect(threadsOf(next)[0]?.messages).toHaveLength(1);
+  });
+
+  it("marks the latest running turn completed when the session becomes ready", () => {
+    const turnId = TurnId.make("turn-1");
+    const state = makeState(
+      makeThread({
+        latestTurn: {
+          turnId,
+          state: "running",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:01.000Z",
+          completedAt: null,
+          assistantMessageId: MessageId.make("assistant-1"),
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.session-set", {
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:05.000Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(next)[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "completed",
+      completedAt: "2026-02-27T00:00:05.000Z",
+    });
   });
 
   it("does not regress latestTurn when an older turn diff completes late", () => {

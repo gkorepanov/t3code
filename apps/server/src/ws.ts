@@ -314,7 +314,6 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const enrichOrchestrationEvents = (events: ReadonlyArray<OrchestrationEvent>) =>
         Effect.forEach(events, enrichProjectEvent, { concurrency: 4 });
 
-      const MAX_DELTA_REPLAY_EVENT_COUNT = 5_000;
       const DELTA_STREAM_BATCH_SIZE = 100;
       const DELTA_STREAM_BATCH_WINDOW = Duration.millis(50);
 
@@ -643,11 +642,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           cause,
         });
 
-      const streamDeltaEventsFrom = (
-        fromSequenceExclusive: number,
-        options?: { readonly fallbackToSnapshotOnFailure?: boolean },
-      ): OrchestrationDeltaStream => {
-        const stream = orchestrationEngine
+      const streamDeltaEventsFrom = (fromSequenceExclusive: number): OrchestrationDeltaStream =>
+        orchestrationEngine
           .streamEventsFrom(
             clamp(fromSequenceExclusive, {
               maximum: Number.MAX_SAFE_INTEGER,
@@ -658,21 +654,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             Stream.groupedWithin(DELTA_STREAM_BATCH_SIZE, DELTA_STREAM_BATCH_WINDOW),
             Stream.mapEffect(toDeltaStreamItems),
             Stream.flatMap((items) => Stream.fromIterable(items)),
+            Stream.mapError(mapReplayError),
           );
-
-        if (options?.fallbackToSnapshotOnFailure) {
-          return stream.pipe(
-            Stream.catchCause(
-              (cause): OrchestrationDeltaStream =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Stream.fail(mapReplayError(Cause.squash(cause)))
-                  : Stream.unwrap(streamSnapshotThenDeltas()),
-            ),
-          );
-        }
-
-        return stream.pipe(Stream.mapError(mapReplayError));
-      };
 
       const streamSnapshotThenDeltas = (): Effect.Effect<
         OrchestrationDeltaStream,
@@ -689,20 +672,15 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           );
         });
 
-      const streamDeltaEventsOrSnapshotFrom = (
+      const streamDeltaEventsFromSequence = (
         fromSequenceExclusive: number,
       ): Effect.Effect<OrchestrationDeltaStream, OrchestrationGetSnapshotError> =>
-        Effect.gen(function* () {
+        Effect.sync(() => {
           const fromSequence = clamp(fromSequenceExclusive, {
             maximum: Number.MAX_SAFE_INTEGER,
             minimum: 0,
           });
-          const readModel = yield* orchestrationEngine.getReadModel();
-          if (readModel.snapshotSequence - fromSequence > MAX_DELTA_REPLAY_EVENT_COUNT) {
-            return yield* streamSnapshotThenDeltas();
-          }
-
-          return streamDeltaEventsFrom(fromSequence, { fallbackToSnapshotOnFailure: true });
+          return streamDeltaEventsFrom(fromSequence);
         });
 
       const dispatchBootstrapTurnStart = (
@@ -1287,7 +1265,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ORCHESTRATION_WS_METHODS.subscribeEvents,
             Effect.gen(function* () {
               if (input.fromSequenceExclusive !== undefined) {
-                return yield* streamDeltaEventsOrSnapshotFrom(input.fromSequenceExclusive);
+                return yield* streamDeltaEventsFromSequence(input.fromSequenceExclusive);
               }
 
               return yield* streamSnapshotThenDeltas();

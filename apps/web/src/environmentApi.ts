@@ -5,7 +5,37 @@ import { readEnvironmentConnection } from "./environments/runtime";
 
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();
 
-export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
+interface EnvironmentApiOptions {
+  readonly environmentId?: EnvironmentId;
+}
+
+function scheduleEventRefresh(environmentId: EnvironmentId | undefined) {
+  if (!environmentId) {
+    return;
+  }
+
+  queueMicrotask(() => {
+    void readEnvironmentConnection(environmentId)
+      ?.refreshEvents()
+      .catch(() => undefined);
+  });
+}
+
+async function withEventRefresh<T>(
+  environmentId: EnvironmentId | undefined,
+  operation: Promise<T>,
+): Promise<T> {
+  const result = await operation;
+  scheduleEventRefresh(environmentId);
+  return result;
+}
+
+export function createEnvironmentApi(
+  rpcClient: WsRpcClient,
+  options?: EnvironmentApiOptions,
+): EnvironmentApi {
+  const environmentId = options?.environmentId;
+
   return {
     terminal: {
       open: (input) => rpcClient.terminal.open(input as never),
@@ -40,13 +70,17 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       transcribeVoice: rpcClient.server.transcribeVoice,
     },
     orchestration: {
-      dispatchCommand: rpcClient.orchestration.dispatchCommand,
-      enqueueMessage: rpcClient.orchestration.enqueueMessage,
-      updateQueuedMessage: rpcClient.orchestration.updateQueuedMessage,
+      dispatchCommand: (input) =>
+        withEventRefresh(environmentId, rpcClient.orchestration.dispatchCommand(input)),
+      enqueueMessage: (input) =>
+        withEventRefresh(environmentId, rpcClient.orchestration.enqueueMessage(input)),
+      updateQueuedMessage: (input) =>
+        withEventRefresh(environmentId, rpcClient.orchestration.updateQueuedMessage(input)),
       deleteQueuedMessage: async (input) => {
-        await rpcClient.orchestration.deleteQueuedMessage(input);
+        await withEventRefresh(environmentId, rpcClient.orchestration.deleteQueuedMessage(input));
       },
-      dispatchQueuedMessageNow: rpcClient.orchestration.dispatchQueuedMessageNow,
+      dispatchQueuedMessageNow: (input) =>
+        withEventRefresh(environmentId, rpcClient.orchestration.dispatchQueuedMessageNow(input)),
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       subscribeEvents: (callback, options) =>
@@ -76,7 +110,7 @@ export function readEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi
   }
 
   const connection = readEnvironmentConnection(environmentId);
-  return connection ? createEnvironmentApi(connection.client) : undefined;
+  return connection ? createEnvironmentApi(connection.client, { environmentId }) : undefined;
 }
 
 export function ensureEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi {

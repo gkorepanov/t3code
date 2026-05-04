@@ -9,6 +9,11 @@ describe("transportError", () => {
       true,
     );
     expect(isTransportConnectionErrorMessage("SocketOpenError: Timeout")).toBe(true);
+    expect(
+      isTransportConnectionErrorMessage("SocketReadError: An error occurred during Read"),
+    ).toBe(true);
+    expect(isTransportConnectionErrorMessage("SocketWriteError: write failed")).toBe(true);
+    expect(isTransportConnectionErrorMessage("RpcClientDefect: Unknown socket error")).toBe(true);
   });
 
   it("preserves non-transport thread errors", () => {
@@ -20,5 +25,7 @@ describe("transportError", () => {
 
   it("drops transport failures from thread surfaces", () => {
     expect(sanitizeThreadErrorMessage("SocketCloseError: 1006")).toBeNull();
+    expect(sanitizeThreadErrorMessage("SocketReadError: An error occurred during Read")).toBeNull();
+    expect(sanitizeThreadErrorMessage("RpcClientDefect: Unknown socket error")).toBeNull();
   });
 });

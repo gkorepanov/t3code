@@ -361,6 +361,215 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("does not block reconnect on stale session close", async () => {
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    let closeStarted = false;
+    const closeSpy = vi
+      .spyOn(
+        transport as unknown as {
+          closeSession: (session: unknown) => Promise<void>;
+        },
+        "closeSession",
+      )
+      .mockImplementation(() => {
+        closeStarted = true;
+        return new Promise(() => undefined);
+      });
+
+    const reconnectPromise = transport.reconnect();
+
+    await waitFor(() => {
+      expect(closeStarted).toBe(true);
+    });
+    await expect(
+      Promise.race([
+        reconnectPromise.then(() => "resolved"),
+        new Promise((resolve) => setTimeout(() => resolve("timeout"), 50)),
+      ]),
+    ).resolves.toBe("resolved");
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    closeSpy.mockRestore();
+    await transport.dispose();
+  });
+
+  it("ignores lifecycle events from sessions replaced by explicit reconnect", async () => {
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    const transport = createTransport("ws://localhost:3020", {
+      onOpen,
+      onClose,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(onOpen).toHaveBeenCalledOnce();
+    });
+
+    await transport.reconnect();
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getWsConnectionStatus()).toMatchObject({
+      closeCode: null,
+      closeReason: null,
+      phase: "connecting",
+    });
+
+    const secondSocket = getSocket();
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(onOpen).toHaveBeenCalledTimes(2);
+      expect(getWsConnectionStatus()).toMatchObject({
+        hasConnected: true,
+        phase: "connected",
+      });
+    });
+
+    firstSocket.close(1006, "stale close");
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getWsConnectionStatus()).toMatchObject({
+      closeCode: null,
+      closeReason: null,
+      phase: "connected",
+    });
+
+    await transport.dispose();
+  });
+
+  it("replaces the active session after the websocket closes", async () => {
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    const transport = createTransport("ws://localhost:3020", {
+      onOpen,
+      onClose,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(onOpen).toHaveBeenCalledOnce();
+    });
+
+    firstSocket.close(1006, "server restart");
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledWith({
+        code: 1006,
+        reason: "server restart",
+      });
+    });
+    await waitFor(() => {
+      expect(sockets.length).toBeGreaterThanOrEqual(2);
+    }, 1_500);
+
+    const secondSocket = getSocket();
+    expect(secondSocket).not.toBe(firstSocket);
+
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(secondSocket.sent).toHaveLength(1);
+    });
+
+    const requestMessage = JSON.parse(secondSocket.sent[0] ?? "{}") as { id: string };
+    secondSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: requestMessage.id,
+        exit: {
+          _tag: "Success",
+          value: {
+            keybindings: [],
+            issues: [],
+          },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+
+    await transport.dispose();
+  });
+
+  it("can keep remote transports out of the global websocket status", async () => {
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    const transport = createTransport(
+      "ws://remote.example.com",
+      {
+        onOpen,
+        onClose,
+      },
+      { trackConnectionState: false },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(onOpen).toHaveBeenCalledOnce();
+    });
+    expect(getWsConnectionStatus()).toMatchObject({
+      attemptCount: 0,
+      phase: "idle",
+    });
+
+    socket.close(1012, "remote restart");
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledWith({
+        code: 1012,
+        reason: "remote restart",
+      });
+    });
+    expect(getWsConnectionStatus()).toMatchObject({
+      attemptCount: 0,
+      phase: "idle",
+    });
+
+    await transport.dispose();
+  });
+
   it("marks unary requests as slow until the first server ack arrives", async () => {
     const slowAckThresholdMs = 25;
     setSlowRpcAckThresholdMsForTests(slowAckThresholdMs);
@@ -1072,11 +1281,11 @@ describe("WsTransport", () => {
     };
     const transport = {
       disposed: false,
-      recoveryTimers: new Set(),
       session: {
         clientScope: {} as never,
         runtime,
       },
+      clearRecoveryTimer: () => undefined,
       closeSession: (
         WsTransport.prototype as unknown as {
           closeSession: (session: {

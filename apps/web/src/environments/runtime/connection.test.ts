@@ -66,12 +66,20 @@ function createTestClient() {
           },
         ) => {
           eventListeners.add(listener);
-          eventSubscribeCursors.push(options?.fromSequenceExclusive?.() ?? null);
+          const fromSequenceExclusive = options?.fromSequenceExclusive?.() ?? null;
+          eventSubscribeCursors.push(fromSequenceExclusive);
           eventsResubscribe = options?.onResubscribe;
           queueMicrotask(() => {
+            if (fromSequenceExclusive === null) {
+              listener({
+                kind: "snapshot",
+                snapshot: createStateSnapshot(1),
+              });
+              return;
+            }
             listener({
-              kind: "snapshot",
-              snapshot: createStateSnapshot(1),
+              kind: "caught-up",
+              sequence: fromSequenceExclusive,
             });
           });
           return () => {
@@ -283,11 +291,12 @@ describe("createEnvironmentConnection", () => {
     await connection.dispose();
   });
 
-  it("waits for a fresh shell snapshot after reconnect", async () => {
+  it("replays deltas from the applied sequence after reconnect", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client, eventSubscribeCursors } = createTestClient();
     const syncStateSnapshot = vi.fn();
     const applyDeltaEvent = vi.fn();
+    let appliedSequence: number | null = null;
 
     const connection = createEnvironmentConnection({
       kind: "saved",
@@ -305,11 +314,12 @@ describe("createEnvironmentConnection", () => {
       applyDeltaEvent,
       syncStateSnapshot,
       markCaughtUp: vi.fn(() => true),
-      readAppliedSequence: vi.fn(() => 1),
+      readAppliedSequence: vi.fn(() => appliedSequence),
       applyTerminalEvent: vi.fn(),
     });
 
     await connection.ensureBootstrapped();
+    appliedSequence = 1;
 
     const reconnectPromise = connection.reconnect();
     await Promise.resolve();
@@ -318,8 +328,8 @@ describe("createEnvironmentConnection", () => {
     await reconnectPromise;
 
     expect(client.reconnect).toHaveBeenCalledTimes(1);
-    expect(syncStateSnapshot).toHaveBeenCalledTimes(2);
-    expect(eventSubscribeCursors).toEqual([1, 1]);
+    expect(syncStateSnapshot).toHaveBeenCalledTimes(1);
+    expect(eventSubscribeCursors).toEqual([null, 1]);
     expect(applyDeltaEvent).not.toHaveBeenCalled();
 
     await connection.dispose();
@@ -328,7 +338,7 @@ describe("createEnvironmentConnection", () => {
   it("refreshes event replay without reconnecting the transport", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client, eventSubscribeCursors } = createTestClient();
-    let appliedSequence: number | null = 1;
+    let appliedSequence: number | null = null;
 
     const connection = createEnvironmentConnection({
       kind: "saved",
@@ -355,7 +365,7 @@ describe("createEnvironmentConnection", () => {
     await connection.refreshEvents();
 
     expect(client.reconnect).not.toHaveBeenCalled();
-    expect(eventSubscribeCursors).toEqual([1, 7]);
+    expect(eventSubscribeCursors).toEqual([null, 7]);
 
     await connection.dispose();
   });

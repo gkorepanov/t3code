@@ -17,6 +17,7 @@ import {
   createWsRpcProtocolLayer,
   makeWsRpcProtocolClient,
   type WsProtocolLifecycleHandlers,
+  type WsProtocolLifecycleOptions,
   type WsRpcProtocolClient,
   type WsRpcProtocolSocketUrlProvider,
 } from "./protocol";
@@ -35,6 +36,10 @@ interface RequestOptions {
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
 const MAX_SESSION_RECOVERY_DELAY_MS = 5_000;
 const NOOP: () => void = () => undefined;
+
+interface WsTransportOptions {
+  readonly trackConnectionState?: boolean;
+}
 
 interface TransportSession {
   readonly clientPromise: Promise<WsRpcProtocolClient>;
@@ -55,13 +60,14 @@ export class WsTransport {
   private disposed = false;
   private hasReportedTransportDisconnect = false;
   private reconnectChain: Promise<void> = Promise.resolve();
+  private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionRecoveryAttempt = 0;
-  private readonly recoveryTimers = new Set<ReturnType<typeof setTimeout>>();
   private session: TransportSession;
 
   constructor(
     url: WsRpcProtocolSocketUrlProvider,
     lifecycleHandlers?: WsProtocolLifecycleHandlers,
+    private readonly options?: WsTransportOptions,
   ) {
     this.url = url;
     this.lifecycleHandlers = lifecycleHandlers;
@@ -194,10 +200,7 @@ export class WsTransport {
       return;
     }
     this.disposed = true;
-    for (const timer of this.recoveryTimers) {
-      clearTimeout(timer);
-    }
-    this.recoveryTimers.clear();
+    this.clearRecoveryTimer();
     await this.closeSession(this.session);
   }
 
@@ -220,10 +223,11 @@ export class WsTransport {
         return;
       }
 
+      this.clearRecoveryTimer();
       clearAllTrackedRpcRequests();
       const previousSession = this.session;
       this.session = this.createSession();
-      await this.closeSession(previousSession);
+      void this.closeSession(previousSession).catch(() => undefined);
     });
 
     this.reconnectChain = reconnectOperation.catch(() => undefined);
@@ -231,13 +235,14 @@ export class WsTransport {
   }
 
   private createSession(): TransportSession {
-    let session: TransportSession | undefined;
+    let session!: TransportSession;
     const lifecycleHandlers: WsProtocolLifecycleHandlers = {
       onAttempt: (socketUrl) => {
         this.lifecycleHandlers?.onAttempt?.(socketUrl);
       },
       onOpen: () => {
         this.sessionRecoveryAttempt = 0;
+        this.clearRecoveryTimer();
         this.lifecycleHandlers?.onOpen?.();
       },
       onError: (message) => {
@@ -245,16 +250,23 @@ export class WsTransport {
       },
       onClose: (details) => {
         this.lifecycleHandlers?.onClose?.(details);
-        if (session !== undefined) {
-          this.scheduleSessionRecovery(session);
-        }
+        this.scheduleSessionRecovery(session);
       },
     };
+    const lifecycleOptions: WsProtocolLifecycleOptions = {
+      shouldHandleLifecycle: () => !this.disposed && this.session === session,
+      ...(this.options?.trackConnectionState === false ? { trackConnectionState: false } : {}),
+    };
     const runtime = ManagedRuntime.make(
-      Layer.mergeAll(createWsRpcProtocolLayer(this.url, lifecycleHandlers), ClientTracingLive),
+      Layer.mergeAll(
+        createWsRpcProtocolLayer(this.url, lifecycleHandlers, lifecycleOptions),
+        ClientTracingLive,
+      ),
     );
     const clientScope = runtime.runSync(Scope.make());
-    const clientPromise = runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient));
+    const clientPromise = Promise.resolve().then(() =>
+      runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+    );
     session = {
       runtime,
       clientScope,
@@ -263,8 +275,16 @@ export class WsTransport {
     return session;
   }
 
+  private clearRecoveryTimer() {
+    if (this.recoveryTimer === null) {
+      return;
+    }
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = null;
+  }
+
   private scheduleSessionRecovery(session: TransportSession) {
-    if (this.disposed || this.session !== session) {
+    if (this.disposed || this.session !== session || this.recoveryTimer !== null) {
       return;
     }
 
@@ -274,11 +294,10 @@ export class WsTransport {
     const delayMs = Math.min(retryDelay, MAX_SESSION_RECOVERY_DELAY_MS);
     this.sessionRecoveryAttempt += 1;
 
-    const timer = setTimeout(() => {
-      this.recoveryTimers.delete(timer);
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null;
       void this.replaceSession(session).catch(() => undefined);
     }, delayMs);
-    this.recoveryTimers.add(timer);
   }
 
   private runStreamOnSession<TValue>(

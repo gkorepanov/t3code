@@ -98,6 +98,10 @@ const rpcClientMock = {
   },
   orchestration: {
     dispatchCommand: vi.fn(),
+    enqueueMessage: vi.fn(),
+    updateQueuedMessage: vi.fn(),
+    deleteQueuedMessage: vi.fn(),
+    dispatchQueuedMessageNow: vi.fn(),
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
     subscribeEvents: vi.fn((listener: (event: OrchestrationEventDeltaStreamItem) => void) =>
@@ -107,11 +111,14 @@ const rpcClientMock = {
       registerListener(shellStreamListeners, listener),
     ),
     subscribeThread: vi.fn(() => () => undefined),
+    subscribeThreadQueue: vi.fn(() => () => undefined),
   },
 };
 
-vi.mock("./environments/runtime", () => ({
-  getPrimaryEnvironmentConnection: () => ({
+const refreshEventsMock = vi.fn(async () => undefined);
+
+function makePrimaryEnvironmentConnection() {
+  return {
     kind: "primary" as const,
     knownEnvironment: {
       id: "environment-local",
@@ -126,10 +133,15 @@ vi.mock("./environments/runtime", () => ({
     client: rpcClientMock,
     environmentId: EnvironmentId.make("environment-local"),
     ensureBootstrapped: async () => undefined,
-    refreshEvents: async () => undefined,
+    refreshEvents: refreshEventsMock,
     reconnect: async () => undefined,
     dispose: async () => undefined,
-  }),
+  };
+}
+
+vi.mock("./environments/runtime", () => ({
+  getPrimaryEnvironmentConnection: () => makePrimaryEnvironmentConnection(),
+  readEnvironmentConnection: () => makePrimaryEnvironmentConnection(),
   resetEnvironmentServiceForTests: vi.fn(),
   resetSavedEnvironmentRegistryStoreForTests: vi.fn(),
   resetSavedEnvironmentRuntimeStoreForTests: vi.fn(),
@@ -454,6 +466,32 @@ describe("wsApi", () => {
     await api.orchestration.dispatchCommand(command);
 
     expect(rpcClientMock.orchestration.dispatchCommand).toHaveBeenCalledWith(command);
+  });
+
+  it("refreshes environment events after successful orchestration mutations", async () => {
+    rpcClientMock.orchestration.dispatchCommand.mockResolvedValue({ sequence: 1 });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never, {
+      environmentId: EnvironmentId.make("environment-local"),
+    });
+    const command = {
+      type: "project.create",
+      commandId: CommandId.make("cmd-1"),
+      projectId: ProjectId.make("project-1"),
+      title: "Project",
+      workspaceRoot: "/tmp/project",
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt: "2026-02-24T00:00:00.000Z",
+    } as const;
+
+    await api.orchestration.dispatchCommand(command);
+    await Promise.resolve();
+
+    expect(refreshEventsMock).toHaveBeenCalledOnce();
   });
 
   it("forwards workspace file writes to the project RPC", async () => {

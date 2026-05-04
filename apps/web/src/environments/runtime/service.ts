@@ -65,7 +65,6 @@ import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
-import { getWsReconnectDelayMsForRetry } from "../../rpc/wsConnectionState";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
@@ -127,8 +126,13 @@ const pendingCachePersistByEnvironment = new Map<
 >();
 const pendingThreadDetailEventsByKey = new Map<string, OrchestrationEvent[]>();
 const lastCachePersistAtByEnvironment = new Map<EnvironmentId, number>();
-const savedEnvironmentReconnectTimers = new Map<EnvironmentId, ReturnType<typeof setTimeout>>();
-const savedEnvironmentReconnectAttempts = new Map<EnvironmentId, number>();
+const savedEnvironmentReconnectTimers = new Map<
+  EnvironmentId,
+  {
+    attempt: number;
+    timeoutId: ReturnType<typeof setTimeout> | null;
+  }
+>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -145,7 +149,7 @@ const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const DELTA_APPLY_IDLE_FLUSH_MS = 50;
 const MAX_PENDING_DELTA_APPLY_EVENTS = 500;
 const CACHE_PERSIST_MIN_INTERVAL_MS = 5_000;
-const SAVED_ENVIRONMENT_RECONNECT_MAX_DELAY_MS = 5_000;
+const SAVED_ENVIRONMENT_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 const NOOP = () => undefined;
 
 function compareAppliedProjectionVersion(
@@ -804,42 +808,6 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
-function clearSavedEnvironmentReconnect(environmentId: EnvironmentId): void {
-  const timer = savedEnvironmentReconnectTimers.get(environmentId);
-  if (timer) {
-    clearTimeout(timer);
-    savedEnvironmentReconnectTimers.delete(environmentId);
-  }
-  savedEnvironmentReconnectAttempts.delete(environmentId);
-}
-
-function scheduleSavedEnvironmentReconnect(environmentId: EnvironmentId): void {
-  const connection = environmentConnections.get(environmentId);
-  if (connection?.kind !== "saved" || savedEnvironmentReconnectTimers.has(environmentId)) {
-    return;
-  }
-
-  const attempt = savedEnvironmentReconnectAttempts.get(environmentId) ?? 0;
-  savedEnvironmentReconnectAttempts.set(environmentId, attempt + 1);
-  const delayMs = Math.min(
-    getWsReconnectDelayMsForRetry(attempt) ?? SAVED_ENVIRONMENT_RECONNECT_MAX_DELAY_MS,
-    SAVED_ENVIRONMENT_RECONNECT_MAX_DELAY_MS,
-  );
-
-  const timer = setTimeout(() => {
-    savedEnvironmentReconnectTimers.delete(environmentId);
-    if (environmentConnections.get(environmentId) !== connection) {
-      return;
-    }
-    void reconnectSavedEnvironment(environmentId).catch(() => {
-      if (environmentConnections.get(environmentId) === connection) {
-        scheduleSavedEnvironmentReconnect(environmentId);
-      }
-    });
-  }, delayMs);
-  savedEnvironmentReconnectTimers.set(environmentId, timer);
-}
-
 function setRuntimeConnecting(environmentId: EnvironmentId) {
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "connecting",
@@ -849,7 +817,7 @@ function setRuntimeConnecting(environmentId: EnvironmentId) {
 }
 
 function setRuntimeConnected(environmentId: EnvironmentId) {
-  clearSavedEnvironmentReconnect(environmentId);
+  clearSavedEnvironmentReconnectTimer(environmentId);
   const connectedAt = isoNow();
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "connected",
@@ -873,12 +841,65 @@ function setRuntimeDisconnected(environmentId: EnvironmentId, reason?: string | 
         }
       : {}),
   });
+  scheduleSavedEnvironmentReconnect(environmentId);
 }
 
 function setRuntimeError(environmentId: EnvironmentId, error: unknown) {
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "error",
     ...getRuntimeErrorFields(error),
+  });
+}
+
+function clearSavedEnvironmentReconnectTimer(environmentId: EnvironmentId): void {
+  const pending = savedEnvironmentReconnectTimers.get(environmentId);
+  if (!pending) {
+    return;
+  }
+  if (pending.timeoutId !== null) {
+    clearTimeout(pending.timeoutId);
+  }
+  savedEnvironmentReconnectTimers.delete(environmentId);
+}
+
+function scheduleSavedEnvironmentReconnect(environmentId: EnvironmentId): void {
+  const existing = savedEnvironmentReconnectTimers.get(environmentId);
+  if (existing?.timeoutId !== null && existing !== undefined) {
+    return;
+  }
+
+  const connection = environmentConnections.get(environmentId);
+  if (connection?.kind !== "saved") {
+    return;
+  }
+
+  const attempt = existing?.attempt ?? 0;
+  const delayMs =
+    SAVED_ENVIRONMENT_RECONNECT_DELAYS_MS[
+      Math.min(attempt, SAVED_ENVIRONMENT_RECONNECT_DELAYS_MS.length - 1)
+    ] ?? 30_000;
+  const timeoutId = setTimeout(() => {
+    const pending = savedEnvironmentReconnectTimers.get(environmentId);
+    if (pending?.timeoutId !== timeoutId) {
+      return;
+    }
+
+    savedEnvironmentReconnectTimers.set(environmentId, {
+      attempt: attempt + 1,
+      timeoutId: null,
+    });
+    void reconnectSavedEnvironment(environmentId)
+      .then(() => {
+        clearSavedEnvironmentReconnectTimer(environmentId);
+      })
+      .catch(() => {
+        scheduleSavedEnvironmentReconnect(environmentId);
+      });
+  }, delayMs);
+
+  savedEnvironmentReconnectTimers.set(environmentId, {
+    attempt,
+    timeoutId,
   });
 }
 
@@ -1007,7 +1028,11 @@ function applyRecoveredEventBatch(
   }
 
   const needsThreadUiSync = events.some(
-    (event) => event.type === "thread.created" || event.type === "thread.deleted",
+    (event) =>
+      event.type === "thread.created" ||
+      event.type === "thread.deleted" ||
+      event.type === "thread.archived" ||
+      event.type === "thread.unarchived",
   );
   if (needsThreadUiSync) {
     const threads = selectThreadsAcrossEnvironments(useStore.getState());
@@ -1275,6 +1300,19 @@ function flattenDeltaApplyItems(items: ReadonlyArray<DeltaApplyItem>): DeltaEven
   );
 }
 
+function isThreadDetailDeltaEvent(event: OrchestrationEvent): boolean {
+  switch (event.type) {
+    case "thread.activity-appended":
+    case "thread.message-sent":
+    case "thread.proposed-plan-upserted":
+    case "thread.reverted":
+    case "thread.turn-diff-completed":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function queuePendingThreadDetailEvent(environmentId: EnvironmentId, event: OrchestrationEvent) {
   const threadId = getEventThreadId(event);
   if (!threadId) {
@@ -1377,10 +1415,17 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
   }
 
   const currentSequence = readAppliedSequence(environmentId);
-  const freshDeltaEvents =
-    currentSequence === null
-      ? deltaEvents
-      : deltaEvents.filter((item) => item.event.sequence > currentSequence);
+  const seenSequences = new Set<number>();
+  const freshDeltaEvents = deltaEvents.filter((item) => {
+    if (currentSequence !== null && item.event.sequence <= currentSequence) {
+      return false;
+    }
+    if (seenSequences.has(item.event.sequence)) {
+      return false;
+    }
+    seenSequences.add(item.event.sequence);
+    return true;
+  });
   if (freshDeltaEvents.length === 0) {
     return;
   }
@@ -1395,31 +1440,31 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
   }
 
   const readyThreadDetailIds = collectReadyThreadDetailIds(environmentId);
-  const detailEvents: OrchestrationEvent[] = [];
+  const eventsToApply: OrchestrationEvent[] = [];
   for (const { event } of freshDeltaEvents) {
     const threadId = getEventThreadId(event);
     if (!threadId) {
-      detailEvents.push(event);
+      eventsToApply.push(event);
       continue;
     }
     if (event.type === "thread.created") {
-      detailEvents.push(event);
+      eventsToApply.push(event);
       readyThreadDetailIds.add(threadId);
       continue;
     }
     if (event.type === "thread.deleted") {
-      detailEvents.push(event);
+      eventsToApply.push(event);
       readyThreadDetailIds.delete(threadId);
       continue;
     }
-    if (readyThreadDetailIds.has(threadId)) {
-      detailEvents.push(event);
+    if (!isThreadDetailDeltaEvent(event) || readyThreadDetailIds.has(threadId)) {
+      eventsToApply.push(event);
       continue;
     }
     queuePendingThreadDetailEvent(environmentId, event);
   }
 
-  applyRecoveredEventBatch(detailEvents, environmentId);
+  applyRecoveredEventBatch(eventsToApply, environmentId);
 
   for (const item of freshDeltaEvents) {
     if (item.shellEvent) {
@@ -1546,9 +1591,9 @@ function createSavedEnvironmentClient(
         },
         onClose: (details: { readonly code: number; readonly reason: string }) => {
           setRuntimeDisconnected(record.environmentId, details.reason);
-          scheduleSavedEnvironmentReconnect(record.environmentId);
         },
       },
+      { trackConnectionState: false },
     ),
   );
 }
@@ -1604,7 +1649,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
     return false;
   }
 
-  clearSavedEnvironmentReconnect(environmentId);
+  clearSavedEnvironmentReconnectTimer(environmentId);
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   flushPendingDeltaEvents(environmentId);
   flushPendingCachePersist(environmentId);
@@ -1774,6 +1819,7 @@ export async function disconnectSavedEnvironment(environmentId: EnvironmentId): 
     return;
   }
 
+  clearSavedEnvironmentReconnectTimer(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   await removeConnection(environmentId).catch(() => false);
 }
@@ -1968,6 +2014,9 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   pendingCachePersistByEnvironment.clear();
   pendingThreadDetailEventsByKey.clear();
   lastCachePersistAtByEnvironment.clear();
+  for (const environmentId of Array.from(savedEnvironmentReconnectTimers.keys())) {
+    clearSavedEnvironmentReconnectTimer(environmentId);
+  }
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);
   }

@@ -210,6 +210,63 @@ function makeThreadMessageSentEvent(params: {
   };
 }
 
+function makeThreadArchivedEvent(params: {
+  readonly sequence: number;
+  readonly threadId: ThreadId;
+}): OrchestrationEvent {
+  const timestamp = "2026-04-13T00:00:02.000Z";
+  return {
+    sequence: params.sequence,
+    eventId: EventId.make(`event-${params.sequence}`),
+    aggregateKind: "thread",
+    aggregateId: params.threadId,
+    occurredAt: timestamp,
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.archived",
+    payload: {
+      threadId: params.threadId,
+      archivedAt: timestamp,
+      updatedAt: timestamp,
+    },
+  };
+}
+
+function makeThreadSessionSetEvent(params: {
+  readonly sequence: number;
+  readonly threadId: ThreadId;
+  readonly status: "idle" | "starting" | "running" | "ready" | "interrupted" | "stopped" | "error";
+}): OrchestrationEvent {
+  const timestamp = "2026-04-13T00:00:02.000Z";
+  const turnId = TurnId.make("turn-1");
+  return {
+    sequence: params.sequence,
+    eventId: EventId.make(`event-${params.sequence}`),
+    aggregateKind: "thread",
+    aggregateId: params.threadId,
+    occurredAt: timestamp,
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.session-set",
+    payload: {
+      threadId: params.threadId,
+      session: {
+        threadId: params.threadId,
+        status: params.status,
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: params.status === "running" ? turnId : null,
+        lastError: null,
+        updatedAt: timestamp,
+      },
+    },
+  };
+}
+
 describe("retainThreadDetailSubscription", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -618,6 +675,110 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("applies thread status events even when detail snapshot is not ready", async () => {
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+    const { useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-status-delta");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(makeThreadShellSnapshot({ threadId }), environmentId);
+
+    connectionInput.applyDeltaEvent(
+      {
+        kind: "event",
+        event: makeThreadSessionSetEvent({
+          sequence: 2,
+          threadId,
+          status: "running",
+        }),
+      },
+      environmentId,
+    );
+    await vi.advanceTimersByTimeAsync(50);
+
+    const runningState = useStore.getState().environmentStateById[environmentId];
+    expect(runningState?.threadSessionById[threadId]?.status).toBe("running");
+    expect(runningState?.threadSessionById[threadId]?.orchestrationStatus).toBe("running");
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("dedupes overlapping delta replay events before gap detection", async () => {
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+    const { useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-overlap-delta");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    const connection = mockCreateEnvironmentConnection.mock.results[0]?.value;
+    expect(connectionInput).toBeDefined();
+    expect(connection).toBeDefined();
+
+    connectionInput.syncShellSnapshot(makeThreadShellSnapshot({ threadId }), environmentId);
+
+    const event = makeThreadSessionSetEvent({
+      sequence: 2,
+      threadId,
+      status: "running",
+    });
+    connectionInput.applyDeltaEvent(
+      {
+        kind: "event-batch",
+        events: [{ event }, { event }],
+      },
+      environmentId,
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await Promise.resolve();
+
+    const runningState = useStore.getState().environmentStateById[environmentId];
+    expect(runningState?.threadSessionById[threadId]?.status).toBe("running");
+    expect(connection.refreshEvents).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("applies archive events even when detail snapshot is not ready", async () => {
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+    const { useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-archive-delta");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(makeThreadShellSnapshot({ threadId }), environmentId);
+
+    connectionInput.applyDeltaEvent(
+      {
+        kind: "event",
+        event: makeThreadArchivedEvent({
+          sequence: 2,
+          threadId,
+        }),
+      },
+      environmentId,
+    );
+    await vi.advanceTimersByTimeAsync(50);
+
+    const archivedState = useStore.getState().environmentStateById[environmentId];
+    expect(archivedState?.threadShellById[threadId]?.archivedAt).toBe("2026-04-13T00:00:02.000Z");
+
     stop();
     await resetEnvironmentServiceForTests();
   });

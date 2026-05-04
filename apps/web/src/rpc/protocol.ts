@@ -24,6 +24,11 @@ export interface WsProtocolLifecycleHandlers {
   readonly onClose?: (details: { readonly code: number; readonly reason: string }) => void;
 }
 
+export interface WsProtocolLifecycleOptions {
+  readonly shouldHandleLifecycle?: () => boolean;
+  readonly trackConnectionState?: boolean;
+}
+
 export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
 type RpcClientFactory = typeof makeWsRpcProtocolClient;
 export type WsRpcProtocolClient =
@@ -62,25 +67,49 @@ function defaultLifecycleHandlers(): Required<WsProtocolLifecycleHandlers> {
   };
 }
 
+function noopLifecycleHandlers(): Required<WsProtocolLifecycleHandlers> {
+  return {
+    onAttempt: () => undefined,
+    onOpen: () => undefined,
+    onError: () => undefined,
+    onClose: () => undefined,
+  };
+}
+
 function composeLifecycleHandlers(
   handlers?: WsProtocolLifecycleHandlers,
+  options?: WsProtocolLifecycleOptions,
 ): Required<WsProtocolLifecycleHandlers> {
-  const defaults = defaultLifecycleHandlers();
+  const defaults =
+    options?.trackConnectionState === false ? noopLifecycleHandlers() : defaultLifecycleHandlers();
+  const shouldHandleLifecycle = options?.shouldHandleLifecycle ?? (() => true);
 
   return {
     onAttempt: (socketUrl) => {
+      if (!shouldHandleLifecycle()) {
+        return;
+      }
       defaults.onAttempt(socketUrl);
       handlers?.onAttempt?.(socketUrl);
     },
     onOpen: () => {
+      if (!shouldHandleLifecycle()) {
+        return;
+      }
       defaults.onOpen();
       handlers?.onOpen?.();
     },
     onError: (message) => {
+      if (!shouldHandleLifecycle()) {
+        return;
+      }
       defaults.onError(message);
       handlers?.onError?.(message);
     },
     onClose: (details) => {
+      if (!shouldHandleLifecycle()) {
+        return;
+      }
       defaults.onClose(details);
       handlers?.onClose?.(details);
     },
@@ -90,8 +119,9 @@ function composeLifecycleHandlers(
 export function createWsRpcProtocolLayer(
   url: WsRpcProtocolSocketUrlProvider,
   handlers?: WsProtocolLifecycleHandlers,
+  options?: WsProtocolLifecycleOptions,
 ) {
-  const lifecycle = composeLifecycleHandlers(handlers);
+  const lifecycle = composeLifecycleHandlers(handlers, options);
   const resolvedUrl =
     typeof url === "function"
       ? Effect.promise(() => url()).pipe(
