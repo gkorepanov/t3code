@@ -741,6 +741,50 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.message-queue.upsert": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.item.updatedAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.message-queue-upserted",
+        payload: {
+          threadId: command.threadId,
+          item: command.item,
+        },
+      };
+    }
+
+    case "thread.message-queue.delete": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.deletedAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.message-queue-deleted",
+        payload: {
+          threadId: command.threadId,
+          id: command.id,
+          preserveAttachments: command.preserveAttachments,
+          deletedAt: command.deletedAt,
+        },
+      };
+    }
+
     default: {
       command satisfies never;
       const fallback = command as never as { type: string };

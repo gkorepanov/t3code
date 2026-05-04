@@ -9,6 +9,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationThread,
   type OrchestrationShellSnapshot,
+  type OrchestrationStateSnapshot,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -480,6 +481,50 @@ describe("retainThreadDetailSubscription", () => {
     await connectionInput.hydrateCachedState(environmentId);
 
     expect(mockDeleteCachedThreadDetail).toHaveBeenCalledWith(environmentId, threadId);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not let a cached shell suppress the full state snapshot at the same sequence", async () => {
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+    const { useStore } = await import("../../store");
+
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-cached-shell-only");
+    const shell = {
+      ...makeThreadShellSnapshot({ threadId }),
+      snapshotSequence: 5,
+    };
+    const thread = makeThreadDetail(threadId);
+    const snapshot = {
+      snapshotSequence: 5,
+      shell,
+      threads: [thread],
+      messageQueues: [],
+      updatedAt: "2026-04-13T00:00:01.000Z",
+    } satisfies OrchestrationStateSnapshot;
+
+    mockReadCachedEnvironmentState.mockResolvedValueOnce({
+      shell,
+      threads: [],
+    });
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    await connectionInput.hydrateCachedState(environmentId);
+    expect(connectionInput.readAppliedSequence(environmentId)).toBeNull();
+
+    connectionInput.syncStateSnapshot(snapshot, environmentId);
+
+    const environmentState = useStore.getState().environmentStateById[environmentId];
+    expect(environmentState?.messageIdsByThreadId[threadId]).toEqual([MessageId.make("message-1")]);
+    expect(environmentState?.messageByThreadId[threadId]?.[MessageId.make("message-1")]?.text).toBe(
+      "hello",
+    );
 
     stop();
     await resetEnvironmentServiceForTests();

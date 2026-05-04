@@ -73,6 +73,7 @@ import {
 } from "../pendingUserInput";
 import {
   selectProjectsAcrossEnvironments,
+  selectQueuedMessagesByThreadRef,
   selectThreadsAcrossEnvironments,
   useStore,
 } from "../store";
@@ -177,7 +178,6 @@ import {
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
-import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -188,6 +188,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_QUEUED_MESSAGES: ThreadMessageQueueItem[] = [];
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -809,9 +810,6 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
-  const [queuedMessagesByThreadKey, setQueuedMessagesByThreadKey] = useState<
-    Record<string, ThreadMessageQueueItem[]>
-  >({});
   const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
   const [editingQueuedMessageText, setEditingQueuedMessageText] = useState("");
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
@@ -911,32 +909,13 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
-  const activeQueuedMessages =
-    activeThreadKey && isServerThread ? (queuedMessagesByThreadKey[activeThreadKey] ?? []) : [];
-  useEffect(() => {
-    if (!activeThread || !activeThreadKey || !isServerThread) {
-      return;
-    }
-    const api = readEnvironmentApi(activeThread.environmentId);
-    if (!api) {
-      return;
-    }
-    return api.orchestration.subscribeThreadQueue(
-      { threadId: activeThread.id },
-      (item) => {
-        setQueuedMessagesByThreadKey((existing) => ({
-          ...existing,
-          [activeThreadKey]: [...item.snapshot.items],
-        }));
-      },
-      {
-        onResubscribe: () => {
-          setEditingQueuedMessageId(null);
-          setEditingQueuedMessageText("");
-        },
-      },
-    );
-  }, [activeThread, activeThreadKey, isServerThread]);
+  const activeQueuedMessages = useStore(
+    useShallow((state) =>
+      isServerThread
+        ? selectQueuedMessagesByThreadRef(state, activeThreadRef)
+        : EMPTY_QUEUED_MESSAGES,
+    ),
+  );
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -977,13 +956,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeProject = useStore(
     useMemo(() => createProjectSelectorByRef(activeProjectRef), [activeProjectRef]),
   );
-
-  useEffect(() => {
-    if (routeKind !== "server") {
-      return;
-    }
-    return retainThreadDetailSubscription(environmentId, threadId);
-  }, [environmentId, routeKind, threadId]);
 
   // Compute the list of environments this logical project spans, used to
   // drive the environment picker in BranchToolbar.

@@ -11,12 +11,14 @@ import type {
   OrchestrationShellStreamEvent,
   OrchestrationSession,
   OrchestrationSessionStatus,
+  OrchestrationStateSnapshot,
   OrchestrationThread,
   OrchestrationThreadShell,
   OrchestrationThreadActivity,
   ProjectId,
   ScopedProjectRef,
   ScopedThreadRef,
+  ThreadMessageQueueItem,
 } from "@t3tools/contracts";
 import { ProviderKind } from "@t3tools/contracts";
 import type { ThreadId, TurnId } from "@t3tools/contracts";
@@ -76,6 +78,8 @@ export interface EnvironmentState {
   proposedPlanByThreadId: Record<ThreadId, Record<string, ProposedPlan>>;
   turnDiffIdsByThreadId: Record<ThreadId, TurnId[]>;
   turnDiffSummaryByThreadId: Record<ThreadId, Record<TurnId, TurnDiffSummary>>;
+  queuedMessageIdsByThreadId: Record<ThreadId, string[]>;
+  queuedMessageByThreadId: Record<ThreadId, Record<string, ThreadMessageQueueItem>>;
 
   // ---------------------------------------------------------------------------
   // Sidebar summary — written ONLY by the shell stream
@@ -110,6 +114,8 @@ const initialEnvironmentState: EnvironmentState = {
   proposedPlanByThreadId: {},
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
+  queuedMessageIdsByThreadId: {},
+  queuedMessageByThreadId: {},
   sidebarThreadSummaryById: {},
   bootstrapComplete: false,
 };
@@ -485,6 +491,20 @@ function buildTurnDiffSlice(thread: Thread): {
   };
 }
 
+function buildQueuedMessageSlice(items: ReadonlyArray<ThreadMessageQueueItem>): {
+  ids: string[];
+  byId: Record<string, ThreadMessageQueueItem>;
+} {
+  const sortedItems = [...items].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+  return {
+    ids: sortedItems.map((item) => item.id),
+    byId: Object.fromEntries(sortedItems.map((item) => [item.id, item] as const)),
+  };
+}
+
 function getProjects(state: EnvironmentState): Project[] {
   return state.projectIds.flatMap((projectId) => {
     const project = state.projectById[projectId];
@@ -799,6 +819,10 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedTurnDiffIds, ...turnDiffIdsByThreadId } = state.turnDiffIdsByThreadId;
   const { [threadId]: _removedTurnDiffs, ...turnDiffSummaryByThreadId } =
     state.turnDiffSummaryByThreadId;
+  const { [threadId]: _removedQueuedMessageIds, ...queuedMessageIdsByThreadId } =
+    state.queuedMessageIdsByThreadId;
+  const { [threadId]: _removedQueuedMessages, ...queuedMessageByThreadId } =
+    state.queuedMessageByThreadId;
   const { [threadId]: _removedSidebarSummary, ...sidebarThreadSummaryById } =
     state.sidebarThreadSummaryById;
 
@@ -817,6 +841,8 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     proposedPlanByThreadId,
     turnDiffIdsByThreadId,
     turnDiffSummaryByThreadId,
+    queuedMessageIdsByThreadId,
+    queuedMessageByThreadId,
     sidebarThreadSummaryById,
   };
 }
@@ -1099,6 +1125,11 @@ function syncEnvironmentShellSnapshot(
       state.turnDiffSummaryByThreadId,
       nextThreadIds,
     ),
+    queuedMessageIdsByThreadId: retainThreadScopedRecord(
+      state.queuedMessageIdsByThreadId,
+      nextThreadIds,
+    ),
+    queuedMessageByThreadId: retainThreadScopedRecord(state.queuedMessageByThreadId, nextThreadIds),
     bootstrapComplete: true,
   };
 
@@ -1118,6 +1149,55 @@ export function syncServerShellSnapshot(
     state,
     environmentId,
     syncEnvironmentShellSnapshot(
+      getStoredEnvironmentState(state, environmentId),
+      snapshot,
+      environmentId,
+    ),
+  );
+}
+
+function syncEnvironmentStateSnapshot(
+  state: EnvironmentState,
+  snapshot: OrchestrationStateSnapshot,
+  environmentId: EnvironmentId,
+): EnvironmentState {
+  let nextState = syncEnvironmentShellSnapshot(state, snapshot.shell, environmentId);
+  for (const thread of snapshot.threads) {
+    if (thread.deletedAt !== null) {
+      continue;
+    }
+    const previousThread = getThreadFromEnvironmentState(nextState, thread.id);
+    nextState = writeThreadState(nextState, mapThread(thread, environmentId), previousThread);
+  }
+
+  const activeThreadIds = new Set(snapshot.shell.threads.map((thread) => thread.id));
+  const queuedMessageIdsByThreadId: Record<ThreadId, string[]> = {};
+  const queuedMessageByThreadId: Record<ThreadId, Record<string, ThreadMessageQueueItem>> = {};
+  for (const queue of snapshot.messageQueues) {
+    if (!activeThreadIds.has(queue.threadId)) {
+      continue;
+    }
+    const slice = buildQueuedMessageSlice(queue.items);
+    queuedMessageIdsByThreadId[queue.threadId] = slice.ids;
+    queuedMessageByThreadId[queue.threadId] = slice.byId;
+  }
+
+  return {
+    ...nextState,
+    queuedMessageIdsByThreadId,
+    queuedMessageByThreadId,
+  };
+}
+
+export function syncServerStateSnapshot(
+  state: AppState,
+  snapshot: OrchestrationStateSnapshot,
+  environmentId: EnvironmentId,
+): AppState {
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    syncEnvironmentStateSnapshot(
       getStoredEnvironmentState(state, environmentId),
       snapshot,
       environmentId,
@@ -1164,6 +1244,8 @@ export function clearEnvironmentThreadDetails(
     proposedPlanByThreadId: {},
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
+    queuedMessageIdsByThreadId: {},
+    queuedMessageByThreadId: {},
   });
 }
 
@@ -1649,6 +1731,61 @@ function applyEnvironmentOrchestrationEvent(
         };
       });
 
+    case "thread.message-queue-upserted": {
+      const currentIds = state.queuedMessageIdsByThreadId[event.payload.threadId] ?? [];
+      const currentById = state.queuedMessageByThreadId[event.payload.threadId] ?? {};
+      const nextItems = buildQueuedMessageSlice([
+        ...currentIds.flatMap((id) => {
+          const item = currentById[id];
+          return item && item.id !== event.payload.item.id ? [item] : [];
+        }),
+        event.payload.item,
+      ]);
+      return {
+        ...state,
+        queuedMessageIdsByThreadId: {
+          ...state.queuedMessageIdsByThreadId,
+          [event.payload.threadId]: nextItems.ids,
+        },
+        queuedMessageByThreadId: {
+          ...state.queuedMessageByThreadId,
+          [event.payload.threadId]: nextItems.byId,
+        },
+      };
+    }
+
+    case "thread.message-queue-deleted": {
+      const currentIds = state.queuedMessageIdsByThreadId[event.payload.threadId] ?? [];
+      const currentById = state.queuedMessageByThreadId[event.payload.threadId] ?? {};
+      if (!currentById[event.payload.id]) {
+        return state;
+      }
+      const nextIds = currentIds.filter((id) => id !== event.payload.id);
+      const { [event.payload.id]: _removed, ...nextById } = currentById;
+      if (nextIds.length === 0) {
+        const { [event.payload.threadId]: _removedIds, ...queuedMessageIdsByThreadId } =
+          state.queuedMessageIdsByThreadId;
+        const { [event.payload.threadId]: _removedById, ...queuedMessageByThreadId } =
+          state.queuedMessageByThreadId;
+        return {
+          ...state,
+          queuedMessageIdsByThreadId,
+          queuedMessageByThreadId,
+        };
+      }
+      return {
+        ...state,
+        queuedMessageIdsByThreadId: {
+          ...state.queuedMessageIdsByThreadId,
+          [event.payload.threadId]: nextIds,
+        },
+        queuedMessageByThreadId: {
+          ...state.queuedMessageByThreadId,
+          [event.payload.threadId]: nextById,
+        },
+      };
+    }
+
     case "thread.approval-response-requested":
     case "thread.user-input-response-requested":
       return state;
@@ -1867,6 +2004,22 @@ export function selectSidebarThreadSummaryByRef(
     : undefined;
 }
 
+export function selectQueuedMessagesByThreadRef(
+  state: AppState,
+  ref: ScopedThreadRef | null | undefined,
+): ThreadMessageQueueItem[] {
+  if (!ref) {
+    return [];
+  }
+  const environmentState = selectEnvironmentState(state, ref.environmentId);
+  const ids = environmentState.queuedMessageIdsByThreadId[ref.threadId] ?? [];
+  const byId = environmentState.queuedMessageByThreadId[ref.threadId] ?? {};
+  return ids.flatMap((id) => {
+    const item = byId[id];
+    return item ? [item] : [];
+  });
+}
+
 export function selectThreadIdsByProjectRef(
   state: AppState,
   ref: ScopedProjectRef | null | undefined,
@@ -1961,6 +2114,10 @@ export function setThreadBranch(
 
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
+  syncServerStateSnapshot: (
+    snapshot: OrchestrationStateSnapshot,
+    environmentId: EnvironmentId,
+  ) => void;
   syncServerShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
@@ -1986,6 +2143,8 @@ export const useStore = create<AppStore>((set) => ({
   ...initialState,
   setActiveEnvironmentId: (environmentId) =>
     set((state) => setActiveEnvironmentId(state, environmentId)),
+  syncServerStateSnapshot: (snapshot, environmentId) =>
+    set((state) => syncServerStateSnapshot(state, snapshot, environmentId)),
   syncServerShellSnapshot: (snapshot, environmentId) =>
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
   syncServerThreadDetail: (thread, environmentId) =>

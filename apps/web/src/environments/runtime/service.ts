@@ -5,6 +5,7 @@ import {
   type OrchestrationEventDeltaStreamItem,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
+  type OrchestrationStateSnapshot,
   type PersistedSavedEnvironmentRecord,
   type ServerConfig,
   type TerminalEvent,
@@ -64,6 +65,7 @@ import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
+import { getWsReconnectDelayMsForRetry } from "../../rpc/wsConnectionState";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
@@ -125,6 +127,8 @@ const pendingCachePersistByEnvironment = new Map<
 >();
 const pendingThreadDetailEventsByKey = new Map<string, OrchestrationEvent[]>();
 const lastCachePersistAtByEnvironment = new Map<EnvironmentId, number>();
+const savedEnvironmentReconnectTimers = new Map<EnvironmentId, ReturnType<typeof setTimeout>>();
+const savedEnvironmentReconnectAttempts = new Map<EnvironmentId, number>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -141,6 +145,7 @@ const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const DELTA_APPLY_IDLE_FLUSH_MS = 50;
 const MAX_PENDING_DELTA_APPLY_EVENTS = 500;
 const CACHE_PERSIST_MIN_INTERVAL_MS = 5_000;
+const SAVED_ENVIRONMENT_RECONNECT_MAX_DELAY_MS = 5_000;
 const NOOP = () => undefined;
 
 function compareAppliedProjectionVersion(
@@ -366,17 +371,6 @@ function updateCachedShellSnapshot(
 
 function getEventThreadId(event: OrchestrationEvent): ThreadId | null {
   return event.aggregateKind === "thread" ? (event.aggregateId as ThreadId) : null;
-}
-
-function isThreadDetailDeltaEvent(event: OrchestrationEvent): boolean {
-  return (
-    event.type === "thread.message-sent" ||
-    event.type === "thread.proposed-plan-upserted" ||
-    event.type === "thread.activity-appended" ||
-    event.type === "thread.turn-diff-completed" ||
-    event.type === "thread.reverted" ||
-    event.type === "thread.session-set"
-  );
 }
 
 function collectCachedThreadDetailsForCheckpoint(
@@ -810,6 +804,42 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+function clearSavedEnvironmentReconnect(environmentId: EnvironmentId): void {
+  const timer = savedEnvironmentReconnectTimers.get(environmentId);
+  if (timer) {
+    clearTimeout(timer);
+    savedEnvironmentReconnectTimers.delete(environmentId);
+  }
+  savedEnvironmentReconnectAttempts.delete(environmentId);
+}
+
+function scheduleSavedEnvironmentReconnect(environmentId: EnvironmentId): void {
+  const connection = environmentConnections.get(environmentId);
+  if (connection?.kind !== "saved" || savedEnvironmentReconnectTimers.has(environmentId)) {
+    return;
+  }
+
+  const attempt = savedEnvironmentReconnectAttempts.get(environmentId) ?? 0;
+  savedEnvironmentReconnectAttempts.set(environmentId, attempt + 1);
+  const delayMs = Math.min(
+    getWsReconnectDelayMsForRetry(attempt) ?? SAVED_ENVIRONMENT_RECONNECT_MAX_DELAY_MS,
+    SAVED_ENVIRONMENT_RECONNECT_MAX_DELAY_MS,
+  );
+
+  const timer = setTimeout(() => {
+    savedEnvironmentReconnectTimers.delete(environmentId);
+    if (environmentConnections.get(environmentId) !== connection) {
+      return;
+    }
+    void reconnectSavedEnvironment(environmentId).catch(() => {
+      if (environmentConnections.get(environmentId) === connection) {
+        scheduleSavedEnvironmentReconnect(environmentId);
+      }
+    });
+  }, delayMs);
+  savedEnvironmentReconnectTimers.set(environmentId, timer);
+}
+
 function setRuntimeConnecting(environmentId: EnvironmentId) {
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "connecting",
@@ -819,6 +849,7 @@ function setRuntimeConnecting(environmentId: EnvironmentId) {
 }
 
 function setRuntimeConnected(environmentId: EnvironmentId) {
+  clearSavedEnvironmentReconnect(environmentId);
   const connectedAt = isoNow();
   useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
     connectionState: "connected",
@@ -1140,16 +1171,72 @@ function syncShellSnapshot(
   reconcileSnapshotDerivedState();
 }
 
+function syncStateSnapshot(
+  snapshot: OrchestrationStateSnapshot,
+  environmentId: EnvironmentId,
+): void {
+  if (
+    !shouldApplyProjectionSnapshot({
+      current: readLastAppliedProjectionVersion(environmentId),
+      next: snapshot,
+    })
+  ) {
+    return;
+  }
+
+  useStore.getState().syncServerStateSnapshot(snapshot, environmentId);
+  cachedShellSnapshotByEnvironment.set(environmentId, snapshot.shell);
+  markAppliedProjectionSnapshot(environmentId, snapshot);
+
+  for (const thread of snapshot.threads) {
+    if (thread.deletedAt === null) {
+      markThreadDetailVersion(environmentId, thread.id, snapshot.snapshotSequence);
+    } else {
+      clearThreadDetailVersion(environmentId, thread.id);
+    }
+  }
+
+  queueAppliedCachePersist({
+    environmentId,
+    sequence: snapshot.snapshotSequence,
+  });
+  reconcileThreadDetailSubscriptionsForEnvironment(
+    environmentId,
+    snapshot.shell.threads.map((thread) => thread.id),
+  );
+  reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
+  reconcileSnapshotDerivedState();
+}
+
+function hydrateCachedShellSnapshot(
+  snapshot: OrchestrationShellSnapshot,
+  environmentId: EnvironmentId,
+): boolean {
+  const currentVersion = readLastAppliedProjectionVersion(environmentId);
+  if (currentVersion !== null && snapshot.snapshotSequence <= currentVersion.sequence) {
+    return false;
+  }
+
+  useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
+  cachedShellSnapshotByEnvironment.set(environmentId, snapshot);
+  reconcileThreadDetailSubscriptionsForEnvironment(
+    environmentId,
+    snapshot.threads.map((thread) => thread.id),
+  );
+  reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
+  reconcileSnapshotDerivedState();
+  return true;
+}
+
 async function hydrateCachedEnvironmentState(environmentId: EnvironmentId): Promise<void> {
   const cachedState = await readCachedEnvironmentState(environmentId);
   if (!cachedState.shell) {
     return;
   }
 
-  syncShellSnapshot(cachedState.shell, environmentId, {
-    persist: false,
-    invalidateThreadDetailsOnGap: false,
-  });
+  if (!hydrateCachedShellSnapshot(cachedState.shell, environmentId)) {
+    return;
+  }
 
   const shellThreadIds = new Set(cachedState.shell.threads.map((thread) => thread.id));
   for (const record of cachedState.threads) {
@@ -1232,26 +1319,15 @@ function drainPendingThreadDetailEvents(
   });
 }
 
-function shouldApplyGlobalDeltaEventToDetail(
-  event: OrchestrationEvent,
-  environmentId: EnvironmentId,
-) {
-  const threadId = getEventThreadId(event);
-  if (!threadId || !isThreadDetailDeltaEvent(event)) {
-    return true;
+function collectReadyThreadDetailIds(environmentId: EnvironmentId): Set<ThreadId> {
+  const readyThreadIds = new Set<ThreadId>();
+  for (const key of threadDetailVersionByKey.keys()) {
+    const threadRef = parseScopedThreadKey(key);
+    if (threadRef?.environmentId === environmentId) {
+      readyThreadIds.add(threadRef.threadId);
+    }
   }
-
-  const hasRetainedThreadDetail = threadDetailSubscriptions.has(
-    getThreadDetailSubscriptionKey(environmentId, threadId),
-  );
-  if (!hasRetainedThreadDetail) {
-    return true;
-  }
-
-  if (readThreadDetailVersion(environmentId, threadId) === null) {
-    queuePendingThreadDetailEvent(environmentId, event);
-  }
-  return false;
+  return readyThreadIds;
 }
 
 function flushPendingDeltaEvents(environmentId: EnvironmentId): void {
@@ -1318,12 +1394,32 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
     expectedSequence = item.event.sequence;
   }
 
-  applyRecoveredEventBatch(
-    freshDeltaEvents
-      .map((deltaEvent) => deltaEvent.event)
-      .filter((event) => shouldApplyGlobalDeltaEventToDetail(event, environmentId)),
-    environmentId,
-  );
+  const readyThreadDetailIds = collectReadyThreadDetailIds(environmentId);
+  const detailEvents: OrchestrationEvent[] = [];
+  for (const { event } of freshDeltaEvents) {
+    const threadId = getEventThreadId(event);
+    if (!threadId) {
+      detailEvents.push(event);
+      continue;
+    }
+    if (event.type === "thread.created") {
+      detailEvents.push(event);
+      readyThreadDetailIds.add(threadId);
+      continue;
+    }
+    if (event.type === "thread.deleted") {
+      detailEvents.push(event);
+      readyThreadDetailIds.delete(threadId);
+      continue;
+    }
+    if (readyThreadDetailIds.has(threadId)) {
+      detailEvents.push(event);
+      continue;
+    }
+    queuePendingThreadDetailEvent(environmentId, event);
+  }
+
+  applyRecoveredEventBatch(detailEvents, environmentId);
 
   for (const item of freshDeltaEvents) {
     if (item.shellEvent) {
@@ -1340,6 +1436,9 @@ function applyDeltaItemsNow(items: ReadonlyArray<DeltaApplyItem>, environmentId:
     if (item.event.type === "thread.deleted") {
       deleteCachedThreadDetailState(environmentId, threadId);
       continue;
+    }
+    if (item.event.type === "thread.created") {
+      markThreadDetailVersion(environmentId, threadId, item.event.sequence);
     }
   }
 
@@ -1378,12 +1477,13 @@ function markCaughtUp(sequence: number, environmentId: EnvironmentId): boolean {
 
 function createEnvironmentConnectionHandlers() {
   return {
+    syncShellSnapshot,
     applyShellEvent,
     applyDeltaEvent,
     markCaughtUp,
     readAppliedSequence,
     hydrateCachedState: hydrateCachedEnvironmentState,
-    syncShellSnapshot,
+    syncStateSnapshot,
     applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => {
       const threadRef = scopeThreadRef(environmentId, ThreadId.make(event.threadId));
       const serverThread = selectThreadByRef(useStore.getState(), threadRef);
@@ -1442,9 +1542,11 @@ function createSavedEnvironmentClient(
             lastError: message,
             lastErrorAt: isoNow(),
           });
+          scheduleSavedEnvironmentReconnect(record.environmentId);
         },
         onClose: (details: { readonly code: number; readonly reason: string }) => {
           setRuntimeDisconnected(record.environmentId, details.reason);
+          scheduleSavedEnvironmentReconnect(record.environmentId);
         },
       },
     ),
@@ -1502,6 +1604,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
     return false;
   }
 
+  clearSavedEnvironmentReconnect(environmentId);
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   flushPendingDeltaEvents(environmentId);
   flushPendingCachePersist(environmentId);

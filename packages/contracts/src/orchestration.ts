@@ -357,6 +357,12 @@ export const ThreadMessageQueueStreamItem = Schema.Struct({
 });
 export type ThreadMessageQueueStreamItem = typeof ThreadMessageQueueStreamItem.Type;
 
+export const OrchestrationMessageQueueSnapshot = Schema.Struct({
+  threadId: ThreadId,
+  items: Schema.Array(ThreadMessageQueueItem),
+});
+export type OrchestrationMessageQueueSnapshot = typeof OrchestrationMessageQueueSnapshot.Type;
+
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
@@ -407,6 +413,15 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
+
+export const OrchestrationStateSnapshot = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  shell: OrchestrationShellSnapshot,
+  threads: Schema.Array(OrchestrationThread),
+  messageQueues: Schema.Array(OrchestrationMessageQueueSnapshot),
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationStateSnapshot = typeof OrchestrationStateSnapshot.Type;
 
 export const OrchestrationShellStreamEvent = Schema.Union([
   Schema.Struct({
@@ -744,6 +759,22 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadMessageQueueUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.message-queue.upsert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  item: ThreadMessageQueueItem,
+});
+
+const ThreadMessageQueueDeleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.message-queue.delete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  id: ThreadMessageQueueItemId,
+  preserveAttachments: Schema.Boolean,
+  deletedAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -759,6 +790,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadMessageQueueUpsertCommand,
+  ThreadMessageQueueDeleteCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -792,6 +825,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.message-queue-upserted",
+  "thread.message-queue-deleted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -966,6 +1001,18 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const ThreadMessageQueueUpsertedPayload = Schema.Struct({
+  threadId: ThreadId,
+  item: ThreadMessageQueueItem,
+});
+
+export const ThreadMessageQueueDeletedPayload = Schema.Struct({
+  threadId: ThreadId,
+  id: ThreadMessageQueueItemId,
+  preserveAttachments: Schema.Boolean,
+  deletedAt: IsoDateTime,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -1098,6 +1145,16 @@ export const OrchestrationEvent = Schema.Union([
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
   }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.message-queue-upserted"),
+    payload: ThreadMessageQueueUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.message-queue-deleted"),
+    payload: ThreadMessageQueueDeletedPayload,
+  }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
@@ -1121,7 +1178,7 @@ export type OrchestrationSubscribeEventsInput = typeof OrchestrationSubscribeEve
 export const OrchestrationEventDeltaStreamItem = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("snapshot"),
-    snapshot: OrchestrationShellSnapshot,
+    snapshot: OrchestrationStateSnapshot,
   }),
   Schema.Struct({
     kind: Schema.Literal("event"),

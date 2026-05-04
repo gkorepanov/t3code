@@ -433,6 +433,7 @@ function showDesktopAgentTurnNotification(notification: DesktopAgentTurnNotifica
     title: notification.status === "failed" ? "Agent failed" : "Agent finished",
     body: notification.threadTitle,
     silent: false,
+    ...(process.platform === "darwin" ? { sound: "notification" } : {}),
   });
 
   nativeNotification.on("click", () => {

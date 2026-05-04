@@ -21,6 +21,7 @@ import {
   type WsRpcProtocolSocketUrlProvider,
 } from "./protocol";
 import { isTransportConnectionErrorMessage } from "./transportError";
+import { getWsReconnectDelayMsForRetry } from "./wsConnectionState";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
@@ -32,6 +33,7 @@ interface RequestOptions {
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
+const MAX_SESSION_RECOVERY_DELAY_MS = 5_000;
 const NOOP: () => void = () => undefined;
 
 interface TransportSession {
@@ -53,6 +55,8 @@ export class WsTransport {
   private disposed = false;
   private hasReportedTransportDisconnect = false;
   private reconnectChain: Promise<void> = Promise.resolve();
+  private sessionRecoveryAttempt = 0;
+  private readonly recoveryTimers = new Set<ReturnType<typeof setTimeout>>();
   private session: TransportSession;
 
   constructor(
@@ -170,6 +174,7 @@ export class WsTransport {
           }
           this.hasReportedTransportDisconnect = true;
           await sleep(retryDelayMs);
+          await this.replaceSession(session).catch(() => undefined);
         }
       }
     })();
@@ -181,6 +186,28 @@ export class WsTransport {
   }
 
   async reconnect() {
+    await this.replaceSession();
+  }
+
+  async dispose() {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    for (const timer of this.recoveryTimers) {
+      clearTimeout(timer);
+    }
+    this.recoveryTimers.clear();
+    await this.closeSession(this.session);
+  }
+
+  private closeSession(session: TransportSession) {
+    return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
+      session.runtime.dispose();
+    });
+  }
+
+  private async replaceSession(expectedSession?: TransportSession) {
     if (this.disposed) {
       throw new Error("Transport disposed");
     }
@@ -188,6 +215,9 @@ export class WsTransport {
     const reconnectOperation = this.reconnectChain.then(async () => {
       if (this.disposed) {
         throw new Error("Transport disposed");
+      }
+      if (expectedSession !== undefined && this.session !== expectedSession) {
+        return;
       }
 
       clearAllTrackedRpcRequests();
@@ -200,30 +230,55 @@ export class WsTransport {
     await reconnectOperation;
   }
 
-  async dispose() {
-    if (this.disposed) {
-      return;
-    }
-    this.disposed = true;
-    await this.closeSession(this.session);
-  }
-
-  private closeSession(session: TransportSession) {
-    return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
-      session.runtime.dispose();
-    });
-  }
-
   private createSession(): TransportSession {
+    let session: TransportSession | undefined;
+    const lifecycleHandlers: WsProtocolLifecycleHandlers = {
+      onAttempt: (socketUrl) => {
+        this.lifecycleHandlers?.onAttempt?.(socketUrl);
+      },
+      onOpen: () => {
+        this.sessionRecoveryAttempt = 0;
+        this.lifecycleHandlers?.onOpen?.();
+      },
+      onError: (message) => {
+        this.lifecycleHandlers?.onError?.(message);
+      },
+      onClose: (details) => {
+        this.lifecycleHandlers?.onClose?.(details);
+        if (session !== undefined) {
+          this.scheduleSessionRecovery(session);
+        }
+      },
+    };
     const runtime = ManagedRuntime.make(
-      Layer.mergeAll(createWsRpcProtocolLayer(this.url, this.lifecycleHandlers), ClientTracingLive),
+      Layer.mergeAll(createWsRpcProtocolLayer(this.url, lifecycleHandlers), ClientTracingLive),
     );
     const clientScope = runtime.runSync(Scope.make());
-    return {
+    const clientPromise = runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient));
+    session = {
       runtime,
       clientScope,
-      clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+      clientPromise,
     };
+    return session;
+  }
+
+  private scheduleSessionRecovery(session: TransportSession) {
+    if (this.disposed || this.session !== session) {
+      return;
+    }
+
+    const retryDelay =
+      getWsReconnectDelayMsForRetry(this.sessionRecoveryAttempt) ??
+      Duration.toMillis(DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS);
+    const delayMs = Math.min(retryDelay, MAX_SESSION_RECOVERY_DELAY_MS);
+    this.sessionRecoveryAttempt += 1;
+
+    const timer = setTimeout(() => {
+      this.recoveryTimers.delete(timer);
+      void this.replaceSession(session).catch(() => undefined);
+    }, delayMs);
+    this.recoveryTimers.add(timer);
   }
 
   private runStreamOnSession<TValue>(

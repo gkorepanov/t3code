@@ -11,6 +11,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationEventDeltaStreamItem,
   type OrchestrationShellStreamEvent,
+  type OrchestrationStateSnapshot,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
@@ -576,6 +577,66 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           ),
         );
 
+      const loadStateSnapshot = (): Effect.Effect<
+        OrchestrationStateSnapshot,
+        OrchestrationGetSnapshotError
+      > =>
+        Effect.gen(function* () {
+          const [shell, readModel, queuedThreadIds] = yield* Effect.all([
+            loadShellSnapshot(),
+            projectionSnapshotQuery.getSnapshot().pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load orchestration full snapshot",
+                    cause,
+                  }),
+              ),
+            ),
+            threadMessageQueue.listThreadIdsWithItems().pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load queued message threads",
+                    cause,
+                  }),
+              ),
+            ),
+          ]);
+
+          const messageQueues = yield* Effect.forEach(
+            queuedThreadIds,
+            (threadId) =>
+              threadMessageQueue.snapshot(threadId).pipe(
+                Effect.map((snapshot) => ({
+                  threadId: snapshot.threadId,
+                  items: snapshot.items,
+                })),
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to load queued messages for thread ${threadId}`,
+                      cause,
+                    }),
+                ),
+              ),
+            { concurrency: 8 },
+          );
+
+          const snapshotSequence = Math.min(shell.snapshotSequence, readModel.snapshotSequence);
+          return {
+            snapshotSequence,
+            shell: {
+              ...shell,
+              snapshotSequence,
+            },
+            threads: readModel.threads,
+            messageQueues,
+            updatedAt:
+              readModel.updatedAt > shell.updatedAt ? readModel.updatedAt : shell.updatedAt,
+          };
+        });
+
       const mapReplayError = (cause: unknown) =>
         new OrchestrationGetSnapshotError({
           message: "Failed to replay orchestration events",
@@ -618,7 +679,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         OrchestrationGetSnapshotError
       > =>
         Effect.gen(function* () {
-          const snapshot = yield* loadShellSnapshot();
+          const snapshot = yield* loadStateSnapshot();
           return Stream.concat(
             Stream.make({
               kind: "snapshot" as const,
@@ -857,6 +918,47 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const dispatchQueueSettingCommand = (command: OrchestrationCommand) =>
         dispatchNormalizedCommand(command).pipe(Effect.asVoid);
 
+      const queueMutationCommandId = (operation: string, id: ThreadMessageQueueItem["id"]) =>
+        CommandId.make(`queue:${operation}:${id}:${crypto.randomUUID()}`);
+
+      const dispatchQueueUpsert = (item: ThreadMessageQueueItem, operation: string) =>
+        dispatchNormalizedCommand({
+          type: "thread.message-queue.upsert",
+          commandId: queueMutationCommandId(operation, item.id),
+          threadId: item.threadId,
+          item,
+        }).pipe(
+          Effect.flatMap(() => threadMessageQueue.notifyThreadChanged(item.threadId)),
+          Effect.as(item),
+        );
+
+      const dispatchQueueDelete = (
+        input: {
+          readonly threadId: ThreadId;
+          readonly id: ThreadMessageQueueItem["id"];
+        },
+        options?: { readonly preserveAttachments?: boolean },
+      ) =>
+        Effect.gen(function* () {
+          const item = yield* threadMessageQueue.getById(input);
+          if (!item) {
+            yield* threadMessageQueue.notifyThreadChanged(input.threadId);
+            return;
+          }
+          yield* dispatchNormalizedCommand({
+            type: "thread.message-queue.delete",
+            commandId: queueMutationCommandId("delete", input.id),
+            threadId: input.threadId,
+            id: input.id,
+            preserveAttachments: options?.preserveAttachments === true,
+            deletedAt: new Date().toISOString(),
+          });
+          if (options?.preserveAttachments !== true) {
+            yield* threadMessageQueue.removeAttachmentFiles(item);
+          }
+          yield* threadMessageQueue.notifyThreadChanged(input.threadId);
+        });
+
       const dispatchQueuedMessageNow = Effect.fn("dispatchQueuedMessageNow")(function* (input: {
         readonly threadId: ThreadId;
         readonly id: ThreadMessageQueueItem["id"];
@@ -915,7 +1017,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         }
 
         yield* dispatchNormalizedCommand(buildQueuedTurnStartCommand(item, dispatchedAt));
-        yield* threadMessageQueue.delete(input, { preserveAttachments: true });
+        yield* dispatchQueueDelete(input, { preserveAttachments: true });
         return {
           ...item,
           createdAt: dispatchedAt,
@@ -1055,7 +1157,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 commandId: input.commandId,
                 command: normalizedCommand,
               });
-              return yield* threadMessageQueue.enqueue(item);
+              return yield* dispatchQueueUpsert(item, "enqueue");
             }).pipe(
               Effect.mapError((cause) =>
                 Schema.is(OrchestrationDispatchCommandError)(cause)
@@ -1071,7 +1173,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [ORCHESTRATION_WS_METHODS.updateQueuedMessage]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.updateQueuedMessage,
-            threadMessageQueue.update(input).pipe(
+            Effect.gen(function* () {
+              const item = yield* threadMessageQueue.getById(input);
+              if (!item) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message: "Queued message was not found.",
+                });
+              }
+              return yield* dispatchQueueUpsert(
+                {
+                  ...item,
+                  text: input.text,
+                  updatedAt: input.updatedAt,
+                },
+                "update",
+              );
+            }).pipe(
               Effect.mapError((cause) =>
                 Schema.is(OrchestrationDispatchCommandError)(cause)
                   ? cause
@@ -1086,7 +1203,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [ORCHESTRATION_WS_METHODS.deleteQueuedMessage]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.deleteQueuedMessage,
-            threadMessageQueue.delete(input).pipe(
+            dispatchQueueDelete(input).pipe(
               Effect.as({}),
               Effect.mapError((cause) =>
                 Schema.is(OrchestrationDispatchCommandError)(cause)

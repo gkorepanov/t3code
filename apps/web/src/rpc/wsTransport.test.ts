@@ -916,6 +916,46 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("recreates the websocket session after stream transport failures", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    let attempts = 0;
+
+    const unsubscribe = transport.subscribe(
+      () =>
+        Stream.suspend(() => {
+          attempts += 1;
+          return Stream.fail(new Error("SocketCloseError: WebSocket closed"));
+        }),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(attempts).toBe(1);
+    });
+    await waitFor(() => {
+      expect(sockets.length).toBeGreaterThanOrEqual(2);
+    });
+
+    const secondSocket = getSocket();
+    expect(secondSocket).not.toBe(firstSocket);
+    secondSocket.open();
+
+    await waitFor(() => {
+      expect(attempts).toBeGreaterThanOrEqual(2);
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("logs a transport disconnect once even when multiple subscriptions fail together", async () => {
     const transport = createTransport("ws://localhost:3020");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -1032,6 +1072,7 @@ describe("WsTransport", () => {
     };
     const transport = {
       disposed: false,
+      recoveryTimers: new Set(),
       session: {
         clientScope: {} as never,
         runtime,

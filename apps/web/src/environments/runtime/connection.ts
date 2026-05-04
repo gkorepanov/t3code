@@ -1,7 +1,7 @@
 import type {
   EnvironmentId,
   OrchestrationEventDeltaStreamItem,
-  OrchestrationShellSnapshot,
+  OrchestrationStateSnapshot,
   ServerConfig,
   ServerLifecycleWelcomePayload,
   TerminalEvent,
@@ -26,8 +26,8 @@ interface OrchestrationHandlers {
     item: Extract<OrchestrationEventDeltaStreamItem, { kind: "event" | "event-batch" }>,
     environmentId: EnvironmentId,
   ) => void;
-  readonly syncShellSnapshot: (
-    snapshot: OrchestrationShellSnapshot,
+  readonly syncStateSnapshot: (
+    snapshot: OrchestrationStateSnapshot,
     environmentId: EnvironmentId,
   ) => void;
   readonly markCaughtUp: (sequence: number, environmentId: EnvironmentId) => boolean;
@@ -153,7 +153,7 @@ export function createEnvironmentConnection(
     unsubEvents = input.client.orchestration.subscribeEvents(
       (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeEvents"]>[0]>[0]) => {
         if (item.kind === "snapshot") {
-          input.syncShellSnapshot(item.snapshot, environmentId);
+          input.syncStateSnapshot(item.snapshot, environmentId);
           bootstrapGate.resolve();
           return;
         }
@@ -218,6 +218,7 @@ export function createEnvironmentConnection(
       try {
         await input.client.reconnect();
         await input.refreshMetadata?.();
+        startOrchestrationSubscription({ replaceExisting: true });
         await bootstrapGate.wait();
       } catch (error) {
         bootstrapGate.reject(error);

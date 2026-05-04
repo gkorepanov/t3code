@@ -36,6 +36,8 @@ function makeEnvironmentState(isRunning: boolean): EnvironmentState {
     proposedPlanByThreadId: {},
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
+    queuedMessageIdsByThreadId: {},
+    queuedMessageByThreadId: {},
     sidebarThreadSummaryById: {},
     bootstrapComplete: true,
   };

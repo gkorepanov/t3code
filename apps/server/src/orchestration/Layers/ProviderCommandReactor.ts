@@ -887,10 +887,15 @@ const make = Effect.gen(function* () {
         : {}),
       createdAt: dispatchedAt,
     });
-    yield* threadMessageQueue.delete(
-      { threadId: item.threadId, id: item.id },
-      { preserveAttachments: true },
-    );
+    yield* orchestrationEngine.dispatch({
+      type: "thread.message-queue.delete",
+      commandId: CommandId.make(`queue:delete:${item.id}:${crypto.randomUUID()}`),
+      threadId: item.threadId,
+      id: item.id,
+      preserveAttachments: true,
+      deletedAt: new Date().toISOString(),
+    });
+    yield* threadMessageQueue.notifyThreadChanged(item.threadId);
   });
 
   const maybeDispatchNextQueuedMessage = Effect.fn("maybeDispatchNextQueuedMessage")(function* (

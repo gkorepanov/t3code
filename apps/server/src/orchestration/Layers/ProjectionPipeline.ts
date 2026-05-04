@@ -59,6 +59,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
+  messageQueue: "projection.message-queue",
 } as const;
 
 type ProjectorName =
@@ -935,6 +936,81 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    const applyThreadMessageQueueProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyThreadMessageQueueProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "thread.message-queue-upserted": {
+          const item = event.payload.item;
+          yield* sql`
+            INSERT INTO thread_message_queue (
+              queue_item_id,
+              thread_id,
+              command_id,
+              message_id,
+              text,
+              attachments_json,
+              model_selection_json,
+              title_seed,
+              runtime_mode,
+              interaction_mode,
+              source_proposed_plan_thread_id,
+              source_proposed_plan_id,
+              created_at,
+              updated_at
+            )
+            VALUES (
+              ${item.id},
+              ${item.threadId},
+              ${item.commandId},
+              ${item.messageId},
+              ${item.text},
+              ${JSON.stringify(item.attachments)},
+              ${item.modelSelection ? JSON.stringify(item.modelSelection) : null},
+              ${item.titleSeed ?? null},
+              ${item.runtimeMode},
+              ${item.interactionMode},
+              ${item.sourceProposedPlan?.threadId ?? null},
+              ${item.sourceProposedPlan?.planId ?? null},
+              ${item.createdAt},
+              ${item.updatedAt}
+            )
+            ON CONFLICT(queue_item_id) DO UPDATE SET
+              text = excluded.text,
+              attachments_json = excluded.attachments_json,
+              model_selection_json = excluded.model_selection_json,
+              title_seed = excluded.title_seed,
+              runtime_mode = excluded.runtime_mode,
+              interaction_mode = excluded.interaction_mode,
+              source_proposed_plan_thread_id = excluded.source_proposed_plan_thread_id,
+              source_proposed_plan_id = excluded.source_proposed_plan_id,
+              updated_at = excluded.updated_at
+          `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionPipeline.messageQueue:upsert")));
+          return;
+        }
+
+        case "thread.message-queue-deleted":
+          yield* sql`
+            DELETE FROM thread_message_queue
+            WHERE thread_id = ${event.payload.threadId}
+              AND queue_item_id = ${event.payload.id}
+          `.pipe(Effect.mapError(toPersistenceSqlError("ProjectionPipeline.messageQueue:delete")));
+          return;
+
+        case "thread.deleted":
+          yield* sql`
+            DELETE FROM thread_message_queue
+            WHERE thread_id = ${event.payload.threadId}
+          `.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionPipeline.messageQueue:deleteThread")),
+          );
+          return;
+
+        default:
+          return;
+      }
+    });
+
     const applyThreadSessionsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadSessionsProjection",
     )(function* (event, _attachmentSideEffects) {
@@ -1350,6 +1426,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
         apply: applyThreadActivitiesProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.messageQueue,
+        apply: applyThreadMessageQueueProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,

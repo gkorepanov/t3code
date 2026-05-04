@@ -4,6 +4,22 @@ import { describe, expect, it, vi } from "vitest";
 import { createEnvironmentConnection } from "./connection";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
+function createStateSnapshot(snapshotSequence: number) {
+  const updatedAt = "2026-04-12T00:00:00.000Z";
+  return {
+    snapshotSequence,
+    shell: {
+      snapshotSequence,
+      projects: [],
+      threads: [],
+      updatedAt,
+    },
+    threads: [],
+    messageQueues: [],
+    updatedAt,
+  };
+}
+
 function createTestClient() {
   const lifecycleListeners = new Set<(event: any) => void>();
   const configListeners = new Set<(event: any) => void>();
@@ -55,12 +71,7 @@ function createTestClient() {
           queueMicrotask(() => {
             listener({
               kind: "snapshot",
-              snapshot: {
-                snapshotSequence: 1,
-                projects: [],
-                threads: [],
-                updatedAt: "2026-04-12T00:00:00.000Z",
-              },
+              snapshot: createStateSnapshot(1),
             });
           });
           return () => {
@@ -140,12 +151,7 @@ function createTestClient() {
       for (const listener of eventListeners) {
         listener({
           kind: "snapshot",
-          snapshot: {
-            snapshotSequence,
-            projects: [],
-            threads: [],
-            updatedAt: "2026-04-12T00:00:00.000Z",
-          },
+          snapshot: createStateSnapshot(snapshotSequence),
         });
       }
     },
@@ -179,7 +185,7 @@ describe("createEnvironmentConnection", () => {
   it("bootstraps from the shell subscription snapshot", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client } = createTestClient();
-    const syncShellSnapshot = vi.fn();
+    const syncStateSnapshot = vi.fn();
 
     const connection = createEnvironmentConnection({
       kind: "saved",
@@ -195,7 +201,7 @@ describe("createEnvironmentConnection", () => {
       },
       client,
       applyDeltaEvent: vi.fn(),
-      syncShellSnapshot,
+      syncStateSnapshot,
       markCaughtUp: vi.fn(() => true),
       readAppliedSequence: vi.fn(() => null),
       applyTerminalEvent: vi.fn(),
@@ -203,7 +209,7 @@ describe("createEnvironmentConnection", () => {
 
     await connection.ensureBootstrapped();
 
-    expect(syncShellSnapshot).toHaveBeenCalledWith(
+    expect(syncStateSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ snapshotSequence: 1 }),
       environmentId,
     );
@@ -229,7 +235,7 @@ describe("createEnvironmentConnection", () => {
       },
       client,
       applyDeltaEvent: vi.fn(),
-      syncShellSnapshot: vi.fn(),
+      syncStateSnapshot: vi.fn(),
       markCaughtUp: vi.fn(() => true),
       readAppliedSequence: vi.fn(() => null),
       applyTerminalEvent: vi.fn(),
@@ -261,7 +267,7 @@ describe("createEnvironmentConnection", () => {
       },
       client,
       applyDeltaEvent: vi.fn(),
-      syncShellSnapshot: vi.fn(),
+      syncStateSnapshot: vi.fn(),
       markCaughtUp: vi.fn(() => true),
       readAppliedSequence: vi.fn(() => appliedSequence),
       hydrateCachedState: vi.fn(async () => {
@@ -279,8 +285,8 @@ describe("createEnvironmentConnection", () => {
 
   it("waits for a fresh shell snapshot after reconnect", async () => {
     const environmentId = EnvironmentId.make("env-1");
-    const { client, emitCaughtUp, emitDeltaEvent } = createTestClient();
-    const syncShellSnapshot = vi.fn();
+    const { client, eventSubscribeCursors } = createTestClient();
+    const syncStateSnapshot = vi.fn();
     const applyDeltaEvent = vi.fn();
 
     const connection = createEnvironmentConnection({
@@ -297,7 +303,7 @@ describe("createEnvironmentConnection", () => {
       },
       client,
       applyDeltaEvent,
-      syncShellSnapshot,
+      syncStateSnapshot,
       markCaughtUp: vi.fn(() => true),
       readAppliedSequence: vi.fn(() => 1),
       applyTerminalEvent: vi.fn(),
@@ -307,20 +313,14 @@ describe("createEnvironmentConnection", () => {
 
     const reconnectPromise = connection.reconnect();
     await Promise.resolve();
-    expect(syncShellSnapshot).toHaveBeenCalledTimes(1);
+    expect(syncStateSnapshot).toHaveBeenCalledTimes(1);
 
-    emitDeltaEvent(2);
-    emitCaughtUp(2);
     await reconnectPromise;
 
     expect(client.reconnect).toHaveBeenCalledTimes(1);
-    expect(syncShellSnapshot).toHaveBeenCalledTimes(1);
-    expect(applyDeltaEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({ sequence: 2 }),
-      }),
-      environmentId,
-    );
+    expect(syncStateSnapshot).toHaveBeenCalledTimes(2);
+    expect(eventSubscribeCursors).toEqual([1, 1]);
+    expect(applyDeltaEvent).not.toHaveBeenCalled();
 
     await connection.dispose();
   });
@@ -344,7 +344,7 @@ describe("createEnvironmentConnection", () => {
       },
       client,
       applyDeltaEvent: vi.fn(),
-      syncShellSnapshot: vi.fn(),
+      syncStateSnapshot: vi.fn(),
       markCaughtUp: vi.fn(() => true),
       readAppliedSequence: vi.fn(() => appliedSequence),
       applyTerminalEvent: vi.fn(),

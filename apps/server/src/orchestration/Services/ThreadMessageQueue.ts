@@ -23,6 +23,12 @@ export interface ThreadMessageQueueShape {
     input: ThreadMessageQueueDeleteInput,
     options?: { readonly preserveAttachments?: boolean },
   ) => Effect.Effect<void, OrchestrationDispatchCommandError>;
+  readonly removeAttachmentFiles: (
+    item: ThreadMessageQueueItem,
+  ) => Effect.Effect<void, OrchestrationDispatchCommandError>;
+  readonly notifyThreadChanged: (
+    threadId: ThreadId,
+  ) => Effect.Effect<void, OrchestrationDispatchCommandError>;
   readonly listByThreadId: (
     input: ThreadMessageQueueSubscribeInput,
   ) => Effect.Effect<ReadonlyArray<ThreadMessageQueueItem>, OrchestrationDispatchCommandError>;

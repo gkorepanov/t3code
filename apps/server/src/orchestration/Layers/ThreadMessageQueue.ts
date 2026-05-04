@@ -119,17 +119,7 @@ const make = Effect.gen(function* () {
       Effect.flatMap((rows) => Effect.forEach(rows, decodeRow, { concurrency: 1 })),
     );
 
-  const snapshot: ThreadMessageQueueShape["snapshot"] = (threadId) =>
-    readRows(threadId).pipe(
-      Effect.map(
-        (items): ThreadMessageQueueSnapshot => ({
-          threadId,
-          items: [...items],
-        }),
-      ),
-    );
-
-  const enqueue: ThreadMessageQueueShape["enqueue"] = (item) =>
+  const writeItem = (item: ThreadMessageQueueItem) =>
     sql`
       INSERT INTO thread_message_queue (
         queue_item_id,
@@ -163,44 +153,55 @@ const make = Effect.gen(function* () {
         ${item.createdAt},
         ${item.updatedAt}
       )
-    `.pipe(
-      Effect.mapError(sqlError("enqueue message")),
+      ON CONFLICT(queue_item_id) DO UPDATE SET
+        text = excluded.text,
+        attachments_json = excluded.attachments_json,
+        model_selection_json = excluded.model_selection_json,
+        title_seed = excluded.title_seed,
+        runtime_mode = excluded.runtime_mode,
+        interaction_mode = excluded.interaction_mode,
+        source_proposed_plan_thread_id = excluded.source_proposed_plan_thread_id,
+        source_proposed_plan_id = excluded.source_proposed_plan_id,
+        updated_at = excluded.updated_at
+    `.pipe(Effect.mapError(sqlError("write queued message")));
+
+  const snapshot: ThreadMessageQueueShape["snapshot"] = (threadId) =>
+    readRows(threadId).pipe(
+      Effect.map(
+        (items): ThreadMessageQueueSnapshot => ({
+          threadId,
+          items: [...items],
+        }),
+      ),
+    );
+
+  const enqueue: ThreadMessageQueueShape["enqueue"] = (item) =>
+    writeItem(item).pipe(
       Effect.flatMap(() => publish(item.threadId)),
       Effect.as(item),
     );
 
   const update: ThreadMessageQueueShape["update"] = (input) =>
-    sql
-      .withTransaction(
-        sql`
-        UPDATE thread_message_queue
-        SET text = ${input.text}, updated_at = ${input.updatedAt}
-        WHERE thread_id = ${input.threadId}
-          AND queue_item_id = ${input.id}
-      `.pipe(
-          Effect.mapError(sqlError("update queued message")),
-          Effect.flatMap(() => readRows(input.threadId)),
-          Effect.flatMap((items) =>
-            Effect.gen(function* () {
-              const item = items.find((entry) => entry.id === input.id);
-              if (!item) {
-                return yield* queueError("Queued message was not found.");
-              }
-              yield* publish(input.threadId);
-              return item;
-            }),
-          ),
-        ),
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          Schema.is(OrchestrationDispatchCommandError)(cause)
-            ? cause
-            : sqlError("update queued message")(cause),
-        ),
-      );
+    readRows(input.threadId).pipe(
+      Effect.flatMap((items) =>
+        Effect.gen(function* () {
+          const item = items.find((entry) => entry.id === input.id);
+          if (!item) {
+            return yield* queueError("Queued message was not found.");
+          }
+          const nextItem: ThreadMessageQueueItem = {
+            ...item,
+            text: input.text,
+            updatedAt: input.updatedAt,
+          };
+          yield* writeItem(nextItem);
+          yield* publish(input.threadId);
+          return nextItem;
+        }),
+      ),
+    );
 
-  const removeAttachmentFiles = (item: ThreadMessageQueueItem) =>
+  const removeAttachmentFiles: ThreadMessageQueueShape["removeAttachmentFiles"] = (item) =>
     Effect.forEach(
       item.attachments,
       (attachment) => {
@@ -215,31 +216,26 @@ const make = Effect.gen(function* () {
       { concurrency: 1 },
     ).pipe(Effect.asVoid);
 
+  const notifyThreadChanged: ThreadMessageQueueShape["notifyThreadChanged"] = (threadId) =>
+    publish(threadId);
+
   const deleteItem: ThreadMessageQueueShape["delete"] = (input, options) =>
-    sql
-      .withTransaction(
-        readRows(input.threadId).pipe(
-          Effect.map((items) => items.find((entry) => entry.id === input.id) ?? null),
-          Effect.flatMap((item) =>
-            sql`
-            DELETE FROM thread_message_queue
-            WHERE thread_id = ${input.threadId}
-              AND queue_item_id = ${input.id}
-          `.pipe(Effect.mapError(sqlError("delete queued message")), Effect.as(item)),
-          ),
-        ),
-      )
-      .pipe(
-        Effect.mapError((cause) =>
-          Schema.is(OrchestrationDispatchCommandError)(cause)
-            ? cause
-            : sqlError("delete queued message")(cause),
-        ),
-        Effect.flatMap((item) =>
-          item && options?.preserveAttachments !== true ? removeAttachmentFiles(item) : Effect.void,
-        ),
-        Effect.flatMap(() => publish(input.threadId)),
-      );
+    readRows(input.threadId).pipe(
+      Effect.map((items) => items.find((entry) => entry.id === input.id) ?? null),
+      Effect.flatMap((item) =>
+        item
+          ? sql`
+              DELETE FROM thread_message_queue
+              WHERE thread_id = ${input.threadId}
+                AND queue_item_id = ${input.id}
+            `.pipe(Effect.mapError(sqlError("delete queued message")), Effect.as(item))
+          : Effect.succeed(null),
+      ),
+      Effect.flatMap((item) =>
+        item && options?.preserveAttachments !== true ? removeAttachmentFiles(item) : Effect.void,
+      ),
+      Effect.flatMap(() => publish(input.threadId)),
+    );
 
   const listByThreadId: ThreadMessageQueueShape["listByThreadId"] = (input) =>
     readRows(input.threadId);
@@ -285,6 +281,8 @@ const make = Effect.gen(function* () {
     enqueue,
     update,
     delete: deleteItem,
+    removeAttachmentFiles,
+    notifyThreadChanged,
     listByThreadId,
     getFirstByThreadId,
     getById,
