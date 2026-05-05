@@ -17,6 +17,7 @@ import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { readBrowserClientSettings } from "../../clientPersistenceStorage";
 import { __resetLocalApiForTests } from "../../localApi";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
@@ -783,5 +784,37 @@ describe("GeneralSettingsPanel observability", () => {
       expect(setPreventSleepWhileAgentIsRunning).toHaveBeenCalledWith(true);
     });
     await expect.element(page.getByText("Active for the current run.")).toBeInTheDocument();
+  });
+
+  it("requests browser notification permission before enabling agent notifications", async () => {
+    Reflect.deleteProperty(window, "desktopBridge");
+    const requestPermission = vi.fn(async () => {
+      FakeNotification.permission = "granted";
+      return "granted" as NotificationPermission;
+    });
+    class FakeNotification {
+      static permission: NotificationPermission = "default";
+      static requestPermission = requestPermission;
+
+      close() {}
+    }
+    vi.stubGlobal("Notification", FakeNotification);
+
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByLabelText("Show agent completion notifications").click();
+
+    await vi.waitFor(() => {
+      expect(requestPermission).toHaveBeenCalledTimes(1);
+    });
+    await vi.waitFor(() => {
+      expect(readBrowserClientSettings()?.agentCompletionNotificationsEnabled).toBe(true);
+    });
   });
 });

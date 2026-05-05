@@ -42,6 +42,11 @@ import {
   useDesktopUpdateState,
 } from "../../lib/desktopUpdateReactQuery";
 import {
+  hasDesktopAgentTurnNotificationBridge,
+  hasAgentTurnSystemNotificationSupport,
+  requestBrowserAgentNotificationPermission,
+} from "../../lib/agentNotifications";
+import {
   MAX_CUSTOM_MODEL_LENGTH,
   getCustomModelOptionsByProvider,
   resolveAppModelSelectionState,
@@ -575,9 +580,8 @@ export function useSettingsRestore(onRestored?: () => void) {
     settings.voiceTranscription.openaiApiKey !==
       DEFAULT_UNIFIED_SETTINGS.voiceTranscription.openaiApiKey;
   const areAgentNotificationsDirty =
-    isElectron &&
     settings.agentCompletionNotificationsEnabled !==
-      DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled;
+    DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled;
 
   const changedSettingLabels = useMemo(
     () => [
@@ -805,6 +809,50 @@ export function GeneralSettingsPanel() {
   const openDiagnosticsError = openPathErrorByTarget.logsDirectory ?? null;
   const isOpeningKeybindings = openingPathByTarget.keybindings;
   const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
+  const hasAgentNotificationsSupport = hasAgentTurnSystemNotificationSupport();
+
+  const setAgentCompletionNotificationsEnabled = useCallback(
+    (checked: boolean) => {
+      if (!checked) {
+        updateSettings({ agentCompletionNotificationsEnabled: false });
+        return;
+      }
+
+      if (hasDesktopAgentTurnNotificationBridge()) {
+        updateSettings({ agentCompletionNotificationsEnabled: true });
+        return;
+      }
+
+      void requestBrowserAgentNotificationPermission()
+        .then((permission) => {
+          if (permission === "granted") {
+            updateSettings({ agentCompletionNotificationsEnabled: true });
+            return;
+          }
+
+          toastManager.add({
+            type: "error",
+            title:
+              permission === "unsupported"
+                ? "Notifications are unavailable."
+                : "Notifications are blocked.",
+            description:
+              permission === "unsupported"
+                ? "This browser does not support system notifications."
+                : "Allow notifications in browser settings to enable agent notifications.",
+          });
+        })
+        .catch((error) => {
+          console.error("[AGENT_NOTIFICATIONS] permission request failed", error);
+          toastManager.add({
+            type: "error",
+            title: "Notifications are unavailable.",
+            description: "The browser could not enable system notifications.",
+          });
+        });
+    },
+    [updateSettings],
+  );
 
   const addCustomModel = useCallback(
     (provider: ProviderKind) => {
@@ -1079,35 +1127,40 @@ export function GeneralSettingsPanel() {
 
         <DesktopAgentSleepSettingsRow />
 
-        {isElectron ? (
-          <SettingsRow
-            title="Agent notifications"
-            description="Show desktop notifications when an agent finishes or fails."
-            resetAction={
-              settings.agentCompletionNotificationsEnabled !==
-              DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled ? (
-                <SettingResetButton
-                  label="agent notifications"
-                  onClick={() =>
-                    updateSettings({
-                      agentCompletionNotificationsEnabled:
-                        DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.agentCompletionNotificationsEnabled}
-                onCheckedChange={(checked) =>
-                  updateSettings({ agentCompletionNotificationsEnabled: Boolean(checked) })
+        <SettingsRow
+          title="Agent notifications"
+          description={
+            hasAgentNotificationsSupport
+              ? "Show system notifications when an agent finishes or fails."
+              : "System notifications are unavailable in this browser."
+          }
+          resetAction={
+            settings.agentCompletionNotificationsEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled ? (
+              <SettingResetButton
+                label="agent notifications"
+                onClick={() =>
+                  updateSettings({
+                    agentCompletionNotificationsEnabled:
+                      DEFAULT_UNIFIED_SETTINGS.agentCompletionNotificationsEnabled,
+                  })
                 }
-                aria-label="Show agent completion notifications"
               />
-            }
-          />
-        ) : null}
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.agentCompletionNotificationsEnabled}
+              disabled={
+                !hasAgentNotificationsSupport && !settings.agentCompletionNotificationsEnabled
+              }
+              onCheckedChange={(checked) =>
+                setAgentCompletionNotificationsEnabled(Boolean(checked))
+              }
+              aria-label="Show agent completion notifications"
+            />
+          }
+        />
 
         {!isElectron ? (
           <SettingsRow

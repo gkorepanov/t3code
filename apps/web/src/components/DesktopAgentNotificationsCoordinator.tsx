@@ -3,8 +3,9 @@ import { useEffect, useMemo, useRef } from "react";
 import type { AppState } from "../store";
 import { useStore } from "../store";
 import { useSettings } from "../hooks/useSettings";
+import { showAgentTurnSystemNotification } from "../lib/agentNotifications";
 
-const DESKTOP_AGENT_NOTIFICATIONS_SCOPE = "[DESKTOP_AGENT_NOTIFICATIONS]";
+const AGENT_NOTIFICATIONS_SCOPE = "[AGENT_NOTIFICATIONS]";
 const NOTIFICATION_FRESHNESS_GRACE_MS = 5_000;
 
 type AgentTurnNotificationStatus = "completed" | "failed";
@@ -146,11 +147,6 @@ export function DesktopAgentNotificationsCoordinator() {
       return;
     }
 
-    const bridge = window.desktopBridge;
-    if (!bridge || typeof bridge.showAgentTurnNotification !== "function") {
-      return;
-    }
-
     const notifications = deriveAgentTurnNotifications({
       previous: previousByKey,
       current: currentByKey,
@@ -160,14 +156,12 @@ export function DesktopAgentNotificationsCoordinator() {
 
     for (const notification of notifications) {
       notifiedKeysRef.current.add(notification.dedupeKey);
-      void bridge
-        .showAgentTurnNotification({
-          status: notification.status,
-          threadTitle: notification.threadTitle,
-        })
-        .catch((error) => {
-          console.error(`${DESKTOP_AGENT_NOTIFICATIONS_SCOPE} show failed`, error);
-        });
+      void showAgentTurnSystemNotification({
+        status: notification.status,
+        threadTitle: notification.threadTitle,
+      }).catch((error) => {
+        console.error(`${AGENT_NOTIFICATIONS_SCOPE} show failed`, error);
+      });
     }
   }, [currentByKey, notificationsEnabled]);
 
