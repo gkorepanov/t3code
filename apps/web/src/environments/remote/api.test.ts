@@ -101,7 +101,7 @@ describe("remote environment api", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/api/auth/bootstrap/bearer", {
       method: "POST",
-      credentials: "omit",
+      credentials: "include",
       headers: {
         "content-type": "application/json",
       },
@@ -192,20 +192,20 @@ describe("remote environment api", () => {
       "https://remote.example.com/.well-known/t3/environment",
       {
         method: "GET",
-        credentials: "omit",
+        credentials: "include",
         headers: {},
       },
     );
     expect(fetchMock).toHaveBeenNthCalledWith(2, "https://remote.example.com/api/auth/session", {
       method: "GET",
-      credentials: "omit",
+      credentials: "include",
       headers: {
         authorization: "Bearer bearer-token",
       },
     });
     expect(fetchMock).toHaveBeenNthCalledWith(3, "https://remote.example.com/api/auth/ws-token", {
       method: "POST",
-      credentials: "omit",
+      credentials: "include",
       headers: {
         authorization: "Bearer bearer-token",
       },
