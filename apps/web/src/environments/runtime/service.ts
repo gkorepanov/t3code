@@ -33,9 +33,11 @@ import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { projectQueryKeys } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
 import { getPrimaryKnownEnvironment } from "../primary";
+import { resolvePrimaryEnvironmentHttpUrl } from "../primary";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
+  fetchRemoteOrchestrationSnapshot,
   fetchRemoteSessionState,
   resolveRemoteWebSocketConnectionUrl,
 } from "../remote/api";
@@ -1560,6 +1562,31 @@ function createPrimaryEnvironmentClient(
   return createWsRpcClient(new WsTransport(wsBaseUrl));
 }
 
+async function fetchPrimaryOrchestrationSnapshot(): Promise<OrchestrationStateSnapshot> {
+  const requestUrl = resolvePrimaryEnvironmentHttpUrl("/api/orchestration/snapshot");
+  let response: Response;
+  try {
+    response = await fetch(requestUrl, {
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+      },
+    });
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch orchestration snapshot ${requestUrl} (${(error as Error).message}).`,
+      { cause: error },
+    );
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Failed to fetch orchestration snapshot (${response.status}).`);
+  }
+
+  return (await response.json()) as OrchestrationStateSnapshot;
+}
+
 function createSavedEnvironmentClient(
   record: SavedEnvironmentRecord,
   bearerToken: string,
@@ -1678,6 +1705,7 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
+      loadStateSnapshot: () => fetchPrimaryOrchestrationSnapshot(),
       ...createEnvironmentConnectionHandlers(),
     }),
   );
@@ -1730,6 +1758,11 @@ async function ensureSavedEnvironmentConnection(
     refreshMetadata: async () => {
       await refreshSavedEnvironmentMetadata(record, bearerToken, client);
     },
+    loadStateSnapshot: () =>
+      fetchRemoteOrchestrationSnapshot({
+        httpBaseUrl: record.httpBaseUrl,
+        bearerToken,
+      }),
     onConfigSnapshot: (config) => {
       useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
         descriptor: config.environment,

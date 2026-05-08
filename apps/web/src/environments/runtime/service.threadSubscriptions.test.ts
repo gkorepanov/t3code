@@ -40,6 +40,7 @@ vi.mock("../primary", () => ({
     },
     environmentId: EnvironmentId.make("env-1"),
   })),
+  resolvePrimaryEnvironmentHttpUrl: vi.fn((pathname: string) => `http://127.0.0.1:3000${pathname}`),
 }));
 
 vi.mock("./catalog", () => ({

@@ -30,6 +30,7 @@ interface OrchestrationHandlers {
     snapshot: OrchestrationStateSnapshot,
     environmentId: EnvironmentId,
   ) => void;
+  readonly loadStateSnapshot: (environmentId: EnvironmentId) => Promise<OrchestrationStateSnapshot>;
   readonly markCaughtUp: (sequence: number, environmentId: EnvironmentId) => boolean;
   readonly readAppliedSequence: (environmentId: EnvironmentId) => number | null;
   readonly hydrateCachedState?: (environmentId: EnvironmentId) => Promise<void>;
@@ -153,7 +154,10 @@ export function createEnvironmentConnection(
     },
   );
 
-  const startOrchestrationSubscription = (options?: { readonly replaceExisting?: boolean }) => {
+  const startOrchestrationSubscription = (options?: {
+    readonly replaceExisting?: boolean;
+    readonly fromSequenceExclusive?: number | null;
+  }) => {
     if (disposed) {
       return;
     }
@@ -182,7 +186,8 @@ export function createEnvironmentConnection(
         input.applyDeltaEvent(item, environmentId);
       },
       {
-        fromSequenceExclusive: () => input.readAppliedSequence(environmentId),
+        fromSequenceExclusive: () =>
+          options?.fromSequenceExclusive ?? input.readAppliedSequence(environmentId),
         onResubscribe: () => {
           if (disposed) {
             return;
@@ -194,10 +199,34 @@ export function createEnvironmentConnection(
     hasEventsSubscription = true;
   };
 
+  const loadInitialSnapshotIfNeeded = async (): Promise<{
+    readonly fromSequenceExclusive: number | null;
+    readonly loadedSnapshot: boolean;
+  }> => {
+    const currentSequence = input.readAppliedSequence(environmentId);
+    if (currentSequence !== null) {
+      return { fromSequenceExclusive: currentSequence, loadedSnapshot: false };
+    }
+
+    const snapshot = await input.loadStateSnapshot(environmentId);
+    input.syncStateSnapshot(snapshot, environmentId);
+    return { fromSequenceExclusive: snapshot.snapshotSequence, loadedSnapshot: true };
+  };
+
   const hydrationPromise = Promise.resolve(input.hydrateCachedState?.(environmentId)).catch(
     () => undefined,
   );
-  void hydrationPromise.finally(startOrchestrationSubscription);
+  const bootstrapPromise = hydrationPromise
+    .then(loadInitialSnapshotIfNeeded)
+    .then(({ fromSequenceExclusive, loadedSnapshot }) => {
+      startOrchestrationSubscription({ fromSequenceExclusive });
+      if (loadedSnapshot) {
+        bootstrapGate.resolve();
+      }
+    })
+    .catch((error) => {
+      bootstrapGate.reject(error);
+    });
 
   const unsubTerminalEvent = input.client.terminal.onEvent(
     (event: Parameters<Parameters<WsRpcClient["terminal"]["onEvent"]>[0]>[0]) => {
@@ -224,9 +253,13 @@ export function createEnvironmentConnection(
       if (disposed) {
         throw new Error("Environment connection disposed");
       }
-      await hydrationPromise;
+      await bootstrapPromise;
       resetBootstrap();
-      startOrchestrationSubscription({ replaceExisting: true });
+      const { fromSequenceExclusive, loadedSnapshot } = await loadInitialSnapshotIfNeeded();
+      startOrchestrationSubscription({ replaceExisting: true, fromSequenceExclusive });
+      if (loadedSnapshot) {
+        bootstrapGate.resolve();
+      }
       await bootstrapGate.wait();
     },
     reconnect: async () => {

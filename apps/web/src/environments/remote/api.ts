@@ -3,6 +3,7 @@ import type {
   AuthSessionState,
   AuthWebSocketTokenResult,
   ExecutionEnvironmentDescriptor,
+  OrchestrationStateSnapshot,
 } from "@t3tools/contracts";
 
 class RemoteEnvironmentAuthHttpError extends Error {
@@ -115,6 +116,17 @@ export async function fetchRemoteEnvironmentDescriptor(input: {
   return fetchRemoteJson<ExecutionEnvironmentDescriptor>({
     httpBaseUrl: input.httpBaseUrl,
     pathname: "/.well-known/t3/environment",
+  });
+}
+
+export async function fetchRemoteOrchestrationSnapshot(input: {
+  readonly httpBaseUrl: string;
+  readonly bearerToken: string;
+}): Promise<OrchestrationStateSnapshot> {
+  return fetchRemoteJson<OrchestrationStateSnapshot>({
+    httpBaseUrl: input.httpBaseUrl,
+    pathname: "/api/orchestration/snapshot",
+    bearerToken: input.bearerToken,
   });
 }
 

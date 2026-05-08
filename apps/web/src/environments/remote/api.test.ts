@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
+  fetchRemoteOrchestrationSnapshot,
   fetchRemoteSessionState,
   issueRemoteWebSocketToken,
   resolveRemoteWebSocketConnectionUrl,
@@ -231,6 +232,47 @@ describe("remote environment api", () => {
         bearerToken: "bearer-token",
       }),
     ).resolves.toBe("wss://remote.example.com/?wsToken=ws-token");
+  });
+
+  it("loads orchestration snapshots over bearer auth with credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          snapshotSequence: 42,
+          shell: {
+            snapshotSequence: 42,
+            projects: [],
+            threads: [],
+            updatedAt: "2026-05-08T00:00:00.000Z",
+          },
+          threads: [],
+          messageQueues: [],
+          updatedAt: "2026-05-08T00:00:00.000Z",
+        }),
+        { status: 200 },
+      ),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      fetchRemoteOrchestrationSnapshot({
+        httpBaseUrl: "https://remote.example.com/",
+        bearerToken: "bearer-token",
+      }),
+    ).resolves.toMatchObject({
+      snapshotSequence: 42,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/api/orchestration/snapshot",
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          authorization: "Bearer bearer-token",
+        },
+      },
+    );
   });
 });
 

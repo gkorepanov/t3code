@@ -17,6 +17,7 @@ vi.mock("../remote/target", () => ({
 vi.mock("../remote/api", () => ({
   bootstrapRemoteBearerSession: mockBootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor: mockFetchRemoteEnvironmentDescriptor,
+  fetchRemoteOrchestrationSnapshot: vi.fn(),
   fetchRemoteSessionState: vi.fn(),
   resolveRemoteWebSocketConnectionUrl: vi.fn(),
 }));
