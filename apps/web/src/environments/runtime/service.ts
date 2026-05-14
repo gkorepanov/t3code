@@ -75,6 +75,10 @@ import {
   derivePhysicalProjectKey,
 } from "../../logicalProject";
 import { getClientSettings } from "~/hooks/useSettings";
+import {
+  readCachedPowerSyncShellSnapshot,
+  writeCachedPowerSyncShellSnapshot,
+} from "../powersync/shellSnapshotCache";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -1100,6 +1104,7 @@ function createEnvironmentConnectionHandlers() {
       }
 
       useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
+      writeCachedPowerSyncShellSnapshot(environmentId, snapshot);
       markAppliedProjectionSnapshot(environmentId, snapshot);
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
@@ -1310,6 +1315,32 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
 
 function maybeCreatePrimaryEnvironmentConnection(): EnvironmentConnection | null {
   return getPrimaryKnownEnvironment()?.environmentId ? createPrimaryEnvironmentConnection() : null;
+}
+
+export function hydrateCachedPrimaryPowerSyncShellSnapshot(): void {
+  const knownEnvironment = getPrimaryKnownEnvironment();
+  if (
+    !knownEnvironment?.environmentId ||
+    readPrimaryEnvironmentDescriptor()?.capabilities.powerSync !== true
+  ) {
+    return;
+  }
+
+  const environmentId = knownEnvironment.environmentId;
+  const snapshot = readCachedPowerSyncShellSnapshot(environmentId);
+  if (
+    !snapshot ||
+    !shouldApplyProjectionSnapshot({
+      current: readLastAppliedProjectionVersion(environmentId),
+      next: snapshot,
+    })
+  ) {
+    return;
+  }
+
+  useStore.getState().setActiveEnvironmentId(environmentId);
+  useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
+  markAppliedProjectionSnapshot(environmentId, snapshot);
 }
 
 async function ensureSavedEnvironmentConnection(

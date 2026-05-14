@@ -7,7 +7,7 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
@@ -59,9 +59,16 @@ import {
   ensurePrimaryEnvironmentReady,
   getPrimaryKnownEnvironment,
   resolveInitialServerAuthGateState,
+  type ServerAuthGateState,
   updatePrimaryEnvironmentDescriptor,
+  usePrimaryEnvironmentId,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+
+type RootAuthGateState =
+  | ServerAuthGateState
+  | { readonly status: "hosted-pairing" }
+  | { readonly status: "hosted-static" };
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -84,12 +91,20 @@ export const Route = createRootRouteWithContext<{
       };
     }
 
-    const [, authGateState] = await Promise.all([
-      ensurePrimaryEnvironmentReady(),
-      resolveInitialServerAuthGateState(),
-    ]);
+    if (location.pathname === "/pair") {
+      const [, authGateState] = await Promise.all([
+        ensurePrimaryEnvironmentReady(),
+        resolveInitialServerAuthGateState(),
+      ]);
+      return {
+        authGateState,
+      };
+    }
+
     return {
-      authGateState,
+      authGateState: {
+        status: "authenticated",
+      } as const,
     };
   },
   component: RootRouteView,
@@ -101,8 +116,13 @@ export const Route = createRootRouteWithContext<{
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { authGateState } = Route.useRouteContext();
+  const { authGateState: routeAuthGateState } = Route.useRouteContext();
+  const [authGateState, setAuthGateState] = useState<RootAuthGateState>(routeAuthGateState);
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
+
+  useEffect(() => {
+    setAuthGateState(routeAuthGateState);
+  }, [routeAuthGateState]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -133,6 +153,13 @@ function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
+        <PrimaryEnvironmentBackgroundBootstrap
+          enabled={
+            authGateState.status === "authenticated" &&
+            routeAuthGateState.status === "authenticated"
+          }
+          onAuthGateState={setAuthGateState}
+        />
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
         <SshPasswordPromptDialog />
@@ -220,6 +247,42 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
   );
 }
 
+function PrimaryEnvironmentBackgroundBootstrap({
+  enabled,
+  onAuthGateState,
+}: {
+  readonly enabled: boolean;
+  readonly onAuthGateState: (state: RootAuthGateState) => void;
+}) {
+  const pathname = useLocation({ select: (location) => location.pathname });
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    let disposed = false;
+    void Promise.all([ensurePrimaryEnvironmentReady(), resolveInitialServerAuthGateState()])
+      .then(([, nextAuthGateState]) => {
+        if (disposed) {
+          return;
+        }
+        if (nextAuthGateState.status === "authenticated" || pathname === "/pair") {
+          onAuthGateState(nextAuthGateState);
+        }
+      })
+      .catch((error) => {
+        console.warn("Primary environment bootstrap failed", error);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [enabled, onAuthGateState, pathname]);
+
+  return null;
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -249,13 +312,15 @@ function errorDetails(error: unknown): string {
 }
 
 function ServerStateBootstrap() {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+
   useEffect(() => {
     if (!getPrimaryKnownEnvironment()) {
       return;
     }
 
     return startServerStateSync(getPrimaryEnvironmentConnection().client.server);
-  }, []);
+  }, [primaryEnvironmentId]);
 
   return null;
 }

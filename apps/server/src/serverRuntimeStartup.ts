@@ -440,7 +440,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       } else {
         yield* Effect.logDebug("startup phase: browser open check");
         const startupBrowserTarget = yield* resolveStartupBrowserTarget;
-        if (serverConfig.mode !== "desktop") {
+        if (serverConfig.mode !== "desktop" && !serverConfig.noAuth) {
           yield* Effect.logInfo(
             "Authentication required. Open T3 Code using the pairing URL.",
           ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));

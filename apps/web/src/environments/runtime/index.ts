@@ -20,6 +20,7 @@ export {
   disconnectSavedEnvironment,
   ensureEnvironmentConnectionBootstrapped,
   getPrimaryEnvironmentConnection,
+  hydrateCachedPrimaryPowerSyncShellSnapshot,
   readEnvironmentConnection,
   reconnectSavedEnvironment,
   removeSavedEnvironment,

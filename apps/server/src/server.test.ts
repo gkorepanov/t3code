@@ -385,6 +385,7 @@ const buildAppUnderTest = (options?: {
       staticDir: undefined,
       devUrl,
       noBrowser: true,
+      noAuth: false,
       startupPresentation: "browser",
       desktopBootstrapToken: defaultDesktopBootstrapToken,
       autoBootstrapProjectFromCwd: false,
@@ -1097,6 +1098,37 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "bearer-session-token",
       ]);
       assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("treats explicit no-auth servers as authenticated owner sessions", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({ config: { noAuth: true, host: "0.0.0.0" } });
+
+      const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
+      const sessionResponse = yield* Effect.promise(() => fetch(sessionUrl));
+      const sessionBody = (yield* Effect.promise(() => sessionResponse.json())) as {
+        readonly authenticated: boolean;
+        readonly role?: string;
+        readonly auth: {
+          readonly policy: string;
+          readonly bootstrapMethods: ReadonlyArray<string>;
+          readonly sessionMethods: ReadonlyArray<string>;
+        };
+      };
+
+      assert.equal(sessionResponse.status, 200);
+      assert.equal(sessionBody.authenticated, true);
+      assert.equal(sessionBody.role, "owner");
+      assert.equal(sessionBody.auth.policy, "unsafe-no-auth");
+      assert.deepEqual(sessionBody.auth.bootstrapMethods, []);
+      assert.deepEqual(sessionBody.auth.sessionMethods, []);
+
+      const configUrl = yield* getWsServerUrl("/ws", { authenticated: false });
+      const config = yield* Effect.scoped(
+        withWsRpcClient(configUrl, (client) => client[WS_METHODS.serverGetConfig]({})),
+      );
+      assert.equal(config.auth.policy, "unsafe-no-auth");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

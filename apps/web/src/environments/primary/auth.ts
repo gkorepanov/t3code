@@ -49,7 +49,7 @@ export interface ServerClientSessionRecord {
   readonly current: boolean;
 }
 
-type ServerAuthGateState =
+export type ServerAuthGateState =
   | { status: "authenticated" }
   | {
       status: "requires-auth";

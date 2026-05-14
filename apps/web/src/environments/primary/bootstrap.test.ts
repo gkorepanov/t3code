@@ -31,6 +31,21 @@ const BASE_ENVIRONMENT = {
     powerSync: false,
   },
 };
+const PRIMARY_ENVIRONMENT_DESCRIPTOR_STORAGE_KEY = "t3code:primary-environment-descriptor:v1";
+
+function createLocalStorageStub(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value),
+  } as Storage;
+}
 
 function installTestBrowser(url: string) {
   vi.stubGlobal("window", {
@@ -38,6 +53,7 @@ function installTestBrowser(url: string) {
     history: {
       replaceState: vi.fn(),
     },
+    localStorage: createLocalStorageStub(),
   });
 }
 
@@ -100,6 +116,20 @@ describe("environmentBootstrap", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("http://localhost/.well-known/t3/environment");
+  });
+
+  it("hydrates the primary environment descriptor from local storage before network refresh", async () => {
+    window.localStorage.setItem(
+      PRIMARY_ENVIRONMENT_DESCRIPTOR_STORAGE_KEY,
+      JSON.stringify({
+        targetKey: "http://localhost/\nws://localhost/",
+        descriptor: BASE_ENVIRONMENT,
+      }),
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>());
+
+    expect(getPrimaryKnownEnvironment()?.environmentId).toBe(BASE_ENVIRONMENT.environmentId);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("uses https descriptor urls when the primary environment uses wss", async () => {

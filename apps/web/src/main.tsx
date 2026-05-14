@@ -10,6 +10,7 @@ import { isElectron } from "./env";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
+import { hydrateCachedPrimaryPowerSyncShellSnapshot } from "./environments/runtime";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
@@ -21,6 +22,7 @@ if (isElectron) {
 }
 
 document.title = APP_DISPLAY_NAME;
+hydrateCachedPrimaryPowerSyncShellSnapshot();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

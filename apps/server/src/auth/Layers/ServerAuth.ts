@@ -1,4 +1,5 @@
 import {
+  AuthSessionId,
   type AuthBearerBootstrapResult,
   type AuthClientSession,
   type AuthBootstrapResult,
@@ -36,6 +37,7 @@ type BootstrapExchangeResult = {
 
 const AUTHORIZATION_PREFIX = "Bearer ";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
+const NO_AUTH_SESSION_ID = AuthSessionId.make("unsafe-no-auth-owner");
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
   if (cause.status === 500) {
@@ -68,6 +70,12 @@ export const makeServerAuth = Effect.gen(function* () {
   const authControlPlane = yield* AuthControlPlane;
   const sessions = yield* SessionCredentialService;
   const descriptor = yield* policy.getDescriptor();
+  const noAuthSession: AuthenticatedSession = {
+    sessionId: NO_AUTH_SESSION_ID,
+    subject: "unsafe-no-auth",
+    method: "bearer-session-token",
+    role: "owner",
+  };
 
   const authenticateToken = (token: string): Effect.Effect<AuthenticatedSession, AuthError> =>
     sessions.verify(token).pipe(
@@ -96,6 +104,9 @@ export const makeServerAuth = Effect.gen(function* () {
     );
 
   const authenticateRequest = (request: HttpServerRequest.HttpServerRequest) => {
+    if (descriptor.policy === "unsafe-no-auth") {
+      return Effect.succeed(noAuthSession);
+    }
     const cookieToken = request.cookies[sessions.cookieName];
     const bearerToken = parseBearerToken(request);
     const credential = cookieToken ?? bearerToken;
@@ -111,24 +122,30 @@ export const makeServerAuth = Effect.gen(function* () {
   };
 
   const getSessionState: ServerAuthShape["getSessionState"] = (request) =>
-    authenticateRequest(request).pipe(
-      Effect.map(
-        (session) =>
-          ({
-            authenticated: true,
-            auth: descriptor,
-            role: session.role,
-            sessionMethod: session.method,
-            ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
-          }) satisfies AuthSessionState,
-      ),
-      Effect.catchTag("AuthError", () =>
-        Effect.succeed({
-          authenticated: false,
+    descriptor.policy === "unsafe-no-auth"
+      ? Effect.succeed({
+          authenticated: true,
           auth: descriptor,
-        } satisfies AuthSessionState),
-      ),
-    );
+          role: "owner",
+        } satisfies AuthSessionState)
+      : authenticateRequest(request).pipe(
+          Effect.map(
+            (session) =>
+              ({
+                authenticated: true,
+                auth: descriptor,
+                role: session.role,
+                sessionMethod: session.method,
+                ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
+              }) satisfies AuthSessionState,
+          ),
+          Effect.catchTag("AuthError", () =>
+            Effect.succeed({
+              authenticated: false,
+              auth: descriptor,
+            } satisfies AuthSessionState),
+          ),
+        );
 
   const exchangeBootstrapCredential: ServerAuthShape["exchangeBootstrapCredential"] = (
     credential,
@@ -316,36 +333,49 @@ export const makeServerAuth = Effect.gen(function* () {
     );
 
   const issueStartupPairingUrl: ServerAuthShape["issueStartupPairingUrl"] = (baseUrl) =>
-    issuePairingCredential({ role: "owner" }).pipe(
-      Effect.map((issued) => {
-        const url = new URL(baseUrl);
-        url.pathname = "/pair";
-        url.searchParams.delete("token");
-        url.hash = new URLSearchParams([["token", issued.credential]]).toString();
-        return url.toString();
-      }),
-    );
+    descriptor.policy === "unsafe-no-auth"
+      ? Effect.succeed(baseUrl)
+      : issuePairingCredential({ role: "owner" }).pipe(
+          Effect.map((issued) => {
+            const url = new URL(baseUrl);
+            url.pathname = "/pair";
+            url.searchParams.delete("token");
+            url.hash = new URLSearchParams([["token", issued.credential]]).toString();
+            return url.toString();
+          }),
+        );
 
   const issueWebSocketToken: ServerAuthShape["issueWebSocketToken"] = (session) =>
-    sessions.issueWebSocketToken(session.sessionId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Failed to issue websocket token.",
-            cause,
-          }),
-      ),
-      Effect.map(
-        (issued) =>
-          ({
-            token: issued.token,
-            expiresAt: DateTime.toUtc(issued.expiresAt),
-          }) satisfies AuthWebSocketTokenResult,
-      ),
-    );
+    descriptor.policy === "unsafe-no-auth"
+      ? DateTime.now.pipe(
+          Effect.map((issuedAt) => ({
+            token: "unsafe-no-auth",
+            expiresAt: DateTime.add(issuedAt, { hours: 1 }),
+          })),
+        )
+      : sessions.issueWebSocketToken(session.sessionId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new AuthError({
+                message: "Failed to issue websocket token.",
+                cause,
+              }),
+          ),
+          Effect.map(
+            (issued) =>
+              ({
+                token: issued.token,
+                expiresAt: DateTime.toUtc(issued.expiresAt),
+              }) satisfies AuthWebSocketTokenResult,
+          ),
+        );
 
   const authenticateWebSocketUpgrade: ServerAuthShape["authenticateWebSocketUpgrade"] = (request) =>
     Effect.gen(function* () {
+      if (descriptor.policy === "unsafe-no-auth") {
+        return noAuthSession;
+      }
+
       const requestUrl = HttpServerRequest.toURL(request);
       if (Option.isSome(requestUrl)) {
         const websocketToken = requestUrl.value.searchParams.get(WEBSOCKET_TOKEN_QUERY_PARAM);

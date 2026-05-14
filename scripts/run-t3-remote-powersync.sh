@@ -153,6 +153,7 @@ export T3CODE_POWERSYNC_JWT_PRIVATE_KEY="$(awk '{printf "%s\\n",$0}' "$KEY_FILE"
 export T3CODE_POWERSYNC_JWT_ISSUER="t3code"
 export T3CODE_POWERSYNC_JWT_AUDIENCE="powersync"
 export T3CODE_NO_BROWSER=1
+export T3CODE_NO_AUTH="${T3CODE_NO_AUTH:-0}"
 
 node apps/server/dist/bin.mjs serve --host "$T3_HOST" --port "$T3_PORT" --base-dir "$T3_HOME" &
 T3_PID=$!

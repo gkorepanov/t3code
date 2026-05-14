@@ -243,6 +243,28 @@ describe("resolveInitialServerAuthGateState", () => {
     });
   });
 
+  it("treats unsafe no-auth session state as authenticated", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      sessionResponse({
+        authenticated: true,
+        role: "owner",
+        auth: {
+          policy: "unsafe-no-auth",
+          bootstrapMethods: [],
+          sessionMethods: [],
+          sessionCookieName: "t3_session",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "authenticated",
+    });
+  });
+
   it("retries transient auth session bootstrap failures after restart", async () => {
     vi.useFakeTimers();
     const fetchMock = vi
