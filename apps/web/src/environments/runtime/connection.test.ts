@@ -134,6 +134,56 @@ function createTestClient() {
 }
 
 describe("createEnvironmentConnection", () => {
+  it("uses external remote state instead of the websocket shell stream", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client } = createTestClient();
+    const syncShellSnapshot = vi.fn();
+    const remoteState = {
+      ensureBootstrapped: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      dispatchCommand: vi.fn(async () => ({ sequence: 1 })),
+      getArchivedShellSnapshot: vi.fn(async () => ({
+        snapshotSequence: 1,
+        projects: [],
+        threads: [],
+        updatedAt: "2026-04-12T00:00:00.000Z",
+      })),
+      subscribeShell: vi.fn(() => () => undefined),
+      subscribeThread: vi.fn(() => () => undefined),
+    };
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      remoteState,
+      orchestrationSync: "external",
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot,
+      applyTerminalEvent: vi.fn(),
+    });
+
+    await connection.ensureBootstrapped();
+    await connection.reconnect();
+    await connection.dispose();
+
+    expect(client.orchestration.subscribeShell).not.toHaveBeenCalled();
+    expect(syncShellSnapshot).not.toHaveBeenCalled();
+    expect(remoteState.ensureBootstrapped).toHaveBeenCalledTimes(2);
+    expect(remoteState.reconnect).toHaveBeenCalledTimes(1);
+    expect(remoteState.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("bootstraps from the shell subscription snapshot", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client } = createTestClient();

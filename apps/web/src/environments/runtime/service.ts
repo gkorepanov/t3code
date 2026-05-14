@@ -14,6 +14,7 @@ import { type QueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 import {
   createKnownEnvironment,
+  getKnownEnvironmentHttpBaseUrl,
   getKnownEnvironmentWsBaseUrl,
   scopedThreadKey,
   scopeProjectRef,
@@ -30,7 +31,7 @@ import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { projectQueryKeys } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
-import { getPrimaryKnownEnvironment } from "../primary";
+import { getPrimaryKnownEnvironment, readPrimaryEnvironmentDescriptor } from "../primary";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
@@ -54,6 +55,7 @@ import {
   writeSavedEnvironmentBearerToken,
 } from "./catalog";
 import { createEnvironmentConnection, type EnvironmentConnection } from "./connection";
+import { createRemotePowerSyncState } from "../powersync/connection";
 import {
   useStore,
   selectProjectsAcrossEnvironments,
@@ -371,16 +373,19 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
     return false;
   }
 
-  entry.unsubscribe = connection.client.orchestration.subscribeThread(
-    { threadId: entry.threadId },
-    (item) => {
-      if (item.kind === "snapshot") {
-        useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
-        return;
-      }
-      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
-    },
-  );
+  entry.unsubscribe = connection.remoteState
+    ? connection.remoteState.subscribeThread({ threadId: entry.threadId }, (item) => {
+        if (item.kind === "snapshot") {
+          useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+        }
+      })
+    : connection.client.orchestration.subscribeThread({ threadId: entry.threadId }, (item) => {
+        if (item.kind === "snapshot") {
+          useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+          return;
+        }
+        applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+      });
   return true;
 }
 
@@ -1273,18 +1278,32 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
   if (!knownEnvironment?.environmentId) {
     throw new Error("Unable to resolve the primary environment.");
   }
+  const environmentId = knownEnvironment.environmentId;
 
-  const existing = environmentConnections.get(knownEnvironment.environmentId);
+  const existing = environmentConnections.get(environmentId);
   if (existing) {
     return existing;
   }
+
+  const handlers = createEnvironmentConnectionHandlers();
+  const httpBaseUrl = getKnownEnvironmentHttpBaseUrl(knownEnvironment);
+  const usePowerSync = readPrimaryEnvironmentDescriptor()?.capabilities.powerSync === true;
+  const remoteState =
+    usePowerSync && httpBaseUrl
+      ? createRemotePowerSyncState({
+          environmentId,
+          httpBaseUrl,
+          onShellSnapshot: (snapshot) => handlers.syncShellSnapshot(snapshot, environmentId),
+        })
+      : undefined;
 
   return registerConnection(
     createEnvironmentConnection({
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
-      ...createEnvironmentConnectionHandlers(),
+      ...(remoteState ? { remoteState, orchestrationSync: "external" as const } : {}),
+      ...handlers,
     }),
   );
 }
@@ -1354,6 +1373,18 @@ async function ensureSavedEnvironmentConnection(
           wsBaseUrl: activeRecord.wsBaseUrl,
         },
       });
+      const handlers = createEnvironmentConnectionHandlers();
+      const httpBaseUrl = getKnownEnvironmentHttpBaseUrl(knownEnvironment);
+      if (!httpBaseUrl) {
+        throw new Error(`Unable to resolve HTTP URL for ${activeRecord.label}.`);
+      }
+      const remoteState = createRemotePowerSyncState({
+        environmentId: activeRecord.environmentId,
+        httpBaseUrl,
+        bearerToken: activeBearerToken,
+        onShellSnapshot: (snapshot) =>
+          handlers.syncShellSnapshot(snapshot, activeRecord.environmentId),
+      });
       const connection = createEnvironmentConnection({
         kind: "saved",
         knownEnvironment: {
@@ -1380,7 +1411,9 @@ async function ensureSavedEnvironmentConnection(
             descriptor: payload.environment,
           });
         },
-        ...createEnvironmentConnectionHandlers(),
+        remoteState,
+        orchestrationSync: "external",
+        ...handlers,
       });
 
       try {

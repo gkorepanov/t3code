@@ -19,7 +19,11 @@ const mockGetSavedEnvironmentRecord = vi.fn();
 const mockReadSavedEnvironmentBearerToken = vi.fn();
 const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockGetPrimaryKnownEnvironment = vi.hoisted(() => vi.fn());
+const mockReadPrimaryEnvironmentDescriptor = vi.hoisted(() => vi.fn());
 const mockFetchRemoteSessionState = vi.fn();
+const mockCreateRemotePowerSyncState = vi.fn();
+const mockRemoteSubscribeThread = vi.fn();
+const mockRemoteThreadUnsubscribe = vi.fn();
 const mockConnectionReconnects: Array<ReturnType<typeof vi.fn>> = [];
 let savedEnvironmentRegistryListener: (() => void) | null = null;
 
@@ -29,6 +33,7 @@ function MockWsTransport() {
 
 vi.mock("../primary", () => ({
   getPrimaryKnownEnvironment: mockGetPrimaryKnownEnvironment,
+  readPrimaryEnvironmentDescriptor: mockReadPrimaryEnvironmentDescriptor,
 }));
 
 vi.mock("../remote/api", () => ({
@@ -68,6 +73,10 @@ vi.mock("./catalog", () => ({
 
 vi.mock("./connection", () => ({
   createEnvironmentConnection: mockCreateEnvironmentConnection,
+}));
+
+vi.mock("../powersync/connection", () => ({
+  createRemotePowerSyncState: mockCreateRemotePowerSyncState,
 }));
 
 vi.mock("../../rpc/wsRpcClient", () => ({
@@ -161,9 +170,32 @@ describe("retainThreadDetailSubscription", () => {
       },
       environmentId: EnvironmentId.make("env-1"),
     });
+    mockReadPrimaryEnvironmentDescriptor.mockReturnValue({
+      environmentId: EnvironmentId.make("env-1"),
+      label: "Primary environment",
+      platform: { os: "darwin", arch: "arm64" },
+      serverVersion: "0.0.0-test",
+      capabilities: { repositoryIdentity: true, powerSync: false },
+    });
 
     mockThreadUnsubscribe.mockImplementation(() => undefined);
     mockSubscribeThread.mockImplementation(() => mockThreadUnsubscribe);
+    mockRemoteThreadUnsubscribe.mockImplementation(() => undefined);
+    mockRemoteSubscribeThread.mockImplementation(() => mockRemoteThreadUnsubscribe);
+    mockCreateRemotePowerSyncState.mockReturnValue({
+      ensureBootstrapped: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      dispatchCommand: vi.fn(async () => ({ sequence: 1 })),
+      getArchivedShellSnapshot: vi.fn(async () => ({
+        snapshotSequence: 0,
+        projects: [],
+        threads: [],
+        updatedAt: "1970-01-01T00:00:00.000Z",
+      })),
+      subscribeShell: vi.fn(() => () => undefined),
+      subscribeThread: mockRemoteSubscribeThread,
+    });
     mockCreateWsRpcClient.mockReturnValue({
       server: {
         getConfig: vi.fn(async () => ({
@@ -172,7 +204,7 @@ describe("retainThreadDetailSubscription", () => {
             label: "Remote env",
             platform: { os: "darwin", arch: "arm64" },
             serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
+            capabilities: { repositoryIdentity: true, powerSync: false },
           },
         })),
       },
@@ -188,6 +220,7 @@ describe("retainThreadDetailSubscription", () => {
         environmentId: input.knownEnvironment.environmentId,
         knownEnvironment: input.knownEnvironment,
         client: input.client,
+        remoteState: input.remoteState,
         ensureBootstrapped: vi.fn(async () => undefined),
         reconnect,
         dispose: vi.fn(async () => undefined),
@@ -246,6 +279,54 @@ describe("retainThreadDetailSubscription", () => {
 
     await vi.advanceTimersByTimeAsync(28 * 60 * 1000);
     expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("uses PowerSync for the primary environment when the descriptor advertises it", async () => {
+    mockReadPrimaryEnvironmentDescriptor.mockReturnValue({
+      environmentId: EnvironmentId.make("env-1"),
+      label: "Primary environment",
+      platform: { os: "linux", arch: "x64" },
+      serverVersion: "0.0.0-test",
+      capabilities: { repositoryIdentity: true, powerSync: true },
+    });
+    const remoteState = {
+      ensureBootstrapped: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      dispatchCommand: vi.fn(async () => ({ sequence: 1 })),
+      getArchivedShellSnapshot: vi.fn(async () => ({
+        snapshotSequence: 0,
+        projects: [],
+        threads: [],
+        updatedAt: "1970-01-01T00:00:00.000Z",
+      })),
+      subscribeShell: vi.fn(() => () => undefined),
+      subscribeThread: mockRemoteSubscribeThread,
+    };
+    mockCreateRemotePowerSyncState.mockReturnValueOnce(remoteState);
+
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+
+    expect(mockCreateRemotePowerSyncState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: EnvironmentId.make("env-1"),
+        httpBaseUrl: "http://127.0.0.1:3000/",
+      }),
+    );
+    expect(mockCreateRemotePowerSyncState.mock.calls[0]?.[0]).not.toHaveProperty("bearerToken");
+    expect(mockCreateEnvironmentConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "primary",
+        remoteState,
+        orchestrationSync: "external",
+      }),
+    );
 
     stop();
     await resetEnvironmentServiceForTests();
@@ -361,10 +442,11 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     const release = retainThreadDetailSubscription(environmentId, threadId);
-    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockRemoteSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockSubscribeThread).not.toHaveBeenCalled();
 
     await disconnectSavedEnvironment(environmentId);
-    expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockRemoteThreadUnsubscribe).toHaveBeenCalledTimes(1);
     expect(
       listEnvironmentConnections().some((connection) => connection.environmentId === environmentId),
     ).toBe(false);
@@ -374,7 +456,7 @@ describe("retainThreadDetailSubscription", () => {
     await reconnectPromise;
     await vi.waitFor(() => {
       expect(mockCreateEnvironmentConnection).toHaveBeenCalledTimes(3);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
+      expect(mockRemoteSubscribeThread).toHaveBeenCalledTimes(2);
     });
 
     release();

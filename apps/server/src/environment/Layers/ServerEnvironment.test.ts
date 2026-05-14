@@ -66,6 +66,39 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
 
       expect(first.environmentId).toBe(second.environmentId);
       expect(second.capabilities.repositoryIdentity).toBe(true);
+      expect(second.capabilities.powerSync).toBe(false);
+    }),
+  );
+
+  it.effect("advertises PowerSync only when the server has the full PowerSync config", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-powersync-test-",
+      });
+      const serverConfig = yield* makeServerConfig(baseDir);
+      yield* fileSystem.makeDirectory(nodePath.dirname(serverConfig.environmentIdPath), {
+        recursive: true,
+      });
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(
+        Effect.provide(
+          ServerEnvironmentLive.pipe(
+            Layer.provide(
+              Layer.succeed(ServerConfig, {
+                ...serverConfig,
+                databaseUrl: "postgresql://postgres:postgres@127.0.0.1:5432/t3code",
+                powerSyncUrl: "https://sync.example.test",
+                powerSyncJwtPrivateKey: "private-key",
+              }),
+            ),
+          ),
+        ),
+      );
+
+      expect(descriptor.capabilities.powerSync).toBe(true);
     }),
   );
 

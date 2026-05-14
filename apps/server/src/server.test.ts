@@ -1,3 +1,4 @@
+import * as Crypto from "node:crypto";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -49,6 +50,7 @@ import {
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
+import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 import { vi } from "vitest";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
@@ -68,7 +70,10 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "./orchestration/Services/OrchestrationEngine.ts";
-import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
+import {
+  OrchestrationCommandInvariantError,
+  OrchestrationListenerCallbackError,
+} from "./orchestration/Errors.ts";
 import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
@@ -135,8 +140,24 @@ const testEnvironmentDescriptor = {
   serverVersion: "0.0.0-test",
   capabilities: {
     repositoryIdentity: true,
+    powerSync: false,
   },
 };
+const testPowerSyncPrivateKey = Crypto.generateKeyPairSync("rsa", {
+  modulusLength: 2048,
+  privateKeyEncoding: {
+    type: "pkcs8",
+    format: "pem",
+  },
+  publicKeyEncoding: {
+    type: "spki",
+    format: "pem",
+  },
+}).privateKey;
+const powerSyncTestConfig = {
+  powerSyncUrl: "https://powersync.example.test",
+  powerSyncJwtPrivateKey: testPowerSyncPrivateKey,
+} as const;
 const makeDefaultOrchestrationReadModel = () => {
   const now = "2026-01-01T00:00:00.000Z";
   return {
@@ -708,6 +729,7 @@ const buildAppUnderTest = (options?: {
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provide(layerConfig),
     );
 
@@ -1145,6 +1167,235 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(sessionBody.authenticated, true);
         assert.equal(sessionBody.sessionMethod, "bearer-session-token");
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("accepts PowerSync command uploads idempotently after a client retry", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: unknown[] = [];
+      yield* buildAppUnderTest({
+        config: powerSyncTestConfig,
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const bearerToken = yield* getAuthenticatedBearerSessionToken();
+      const command = {
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-powersync-turn-start"),
+        threadId: ThreadId.make("thread-powersync"),
+        message: {
+          messageId: MessageId.make("msg-powersync-user"),
+          role: "user",
+          text: "hello over PowerSync",
+          attachments: [],
+        },
+        modelSelection: defaultModelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: "2026-05-13T00:00:00.000Z",
+      } as const;
+      const uploadUrl = yield* getHttpServerUrl("/api/powersync/upload");
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const body = JSON.stringify({
+        batch: [
+          {
+            op: "PUT",
+            table: "client_orchestration_commands",
+            id: command.commandId,
+            data: {
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              command_json: JSON.stringify(command),
+              created_at: command.createdAt,
+            },
+          },
+        ],
+      });
+      const postUpload = () =>
+        Effect.promise(() =>
+          fetch(uploadUrl, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${bearerToken}`,
+              "content-type": "application/json",
+            },
+            body,
+          }),
+        );
+
+      const firstResponse = yield* postUpload();
+      const firstBody = (yield* Effect.promise(() => firstResponse.json())) as {
+        readonly acceptedCommandIds: ReadonlyArray<string>;
+      };
+      const retryResponse = yield* postUpload();
+      const retryBody = (yield* Effect.promise(() => retryResponse.json())) as {
+        readonly acceptedCommandIds: ReadonlyArray<string>;
+      };
+
+      assert.equal(firstResponse.status, 200);
+      assert.deepEqual(firstBody.acceptedCommandIds, [command.commandId]);
+      assert.equal(retryResponse.status, 200);
+      assert.deepEqual(retryBody.acceptedCommandIds, [command.commandId]);
+      assert.equal(dispatchedCommands.length, 1);
+      assert.deepInclude(dispatchedCommands[0] as Record<string, unknown>, {
+        type: "thread.turn.start",
+        commandId: command.commandId,
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("issues PowerSync RS256 credentials verifiable by the JWKS endpoint", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: powerSyncTestConfig,
+      });
+
+      const bearerToken = yield* getAuthenticatedBearerSessionToken();
+      const credentialsUrl = yield* getHttpServerUrl("/api/powersync/credentials");
+      const jwksUrl = yield* getHttpServerUrl("/api/powersync/jwks");
+      const headers = { authorization: `Bearer ${bearerToken}` };
+      const credentialsResponse = yield* Effect.promise(() => fetch(credentialsUrl, { headers }));
+      const jwksResponse = yield* Effect.promise(() => fetch(jwksUrl, { headers }));
+      const credentials = (yield* Effect.promise(() => credentialsResponse.json())) as {
+        readonly endpoint: string;
+        readonly token: string;
+        readonly expiresAt: string;
+      };
+      const jwks = (yield* Effect.promise(() => jwksResponse.json())) as JSONWebKeySet;
+      const verified = yield* Effect.promise(() =>
+        jwtVerify(credentials.token, createLocalJWKSet(jwks), {
+          issuer: "t3code",
+          audience: "powersync",
+          currentDate: DateTime.toDate(DateTime.makeUnsafe("1970-01-01T00:00:01.000Z")),
+        }),
+      );
+
+      assert.equal(credentialsResponse.status, 200);
+      assert.equal(jwksResponse.status, 200);
+      assert.equal(credentials.endpoint, powerSyncTestConfig.powerSyncUrl);
+      assert.equal(verified.protectedHeader.alg, "RS256");
+      assert.equal(verified.protectedHeader.kid, "t3code-powersync-rs256");
+      assert.equal(verified.payload.role, "owner");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("acks PowerSync uploads when command dispatch is rejected", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: unknown[] = [];
+      yield* buildAppUnderTest({
+        config: powerSyncTestConfig,
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return command;
+              }).pipe(
+                Effect.flatMap((queuedCommand) =>
+                  Effect.fail(
+                    new OrchestrationCommandInvariantError({
+                      commandType: queuedCommand.type,
+                      detail: "agent rejected the command",
+                    }),
+                  ),
+                ),
+              ),
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const bearerToken = yield* getAuthenticatedBearerSessionToken();
+      const command = {
+        type: "thread.session.stop",
+        commandId: CommandId.make("cmd-powersync-rejected"),
+        threadId: ThreadId.make("thread-powersync-rejected"),
+        createdAt: "2026-05-13T00:00:00.000Z",
+      } as const;
+      const uploadUrl = yield* getHttpServerUrl("/api/powersync/upload");
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const body = JSON.stringify({
+        batch: [
+          {
+            op: "PUT",
+            table: "client_orchestration_commands",
+            id: command.commandId,
+            data: {
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              command_json: JSON.stringify(command),
+              created_at: command.createdAt,
+            },
+          },
+        ],
+      });
+      const postUpload = () =>
+        Effect.promise(() =>
+          fetch(uploadUrl, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${bearerToken}`,
+              "content-type": "application/json",
+            },
+            body,
+          }),
+        );
+
+      const firstResponse = yield* postUpload();
+      const firstBody = (yield* Effect.promise(() => firstResponse.json())) as {
+        readonly acceptedCommandIds: ReadonlyArray<string>;
+      };
+      const retryResponse = yield* postUpload();
+      const retryBody = (yield* Effect.promise(() => retryResponse.json())) as {
+        readonly acceptedCommandIds: ReadonlyArray<string>;
+      };
+
+      assert.equal(firstResponse.status, 200);
+      assert.deepEqual(firstBody.acceptedCommandIds, [command.commandId]);
+      assert.equal(retryResponse.status, 200);
+      assert.deepEqual(retryBody.acceptedCommandIds, [command.commandId]);
+      assert.equal(dispatchedCommands.length, 1);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects PowerSync writes outside the command queue", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: powerSyncTestConfig,
+      });
+
+      const bearerToken = yield* getAuthenticatedBearerSessionToken();
+      const uploadUrl = yield* getHttpServerUrl("/api/powersync/upload");
+      const response = yield* Effect.promise(() =>
+        fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${bearerToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            batch: [
+              {
+                op: "PUT",
+                table: "projection_thread_messages",
+                id: "msg-evil",
+                data: {
+                  text: "not allowed",
+                },
+              },
+            ],
+          }),
+        }),
+      );
+
+      assert.equal(response.status, 400);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>

@@ -136,6 +136,24 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  databaseUrl: Config.string("T3CODE_DATABASE_URL").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  powerSyncUrl: Config.string("T3CODE_POWERSYNC_URL").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  powerSyncJwtPrivateKey: Config.string("T3CODE_POWERSYNC_JWT_PRIVATE_KEY").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  powerSyncJwtIssuer: Config.string("T3CODE_POWERSYNC_JWT_ISSUER").pipe(
+    Config.withDefault("t3code"),
+  ),
+  powerSyncJwtAudience: Config.string("T3CODE_POWERSYNC_JWT_AUDIENCE").pipe(
+    Config.withDefault("powersync"),
+  ),
 });
 
 export interface CliServerFlags {
@@ -374,6 +392,11 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      databaseUrl: env.databaseUrl,
+      powerSyncUrl: env.powerSyncUrl,
+      powerSyncJwtPrivateKey: env.powerSyncJwtPrivateKey,
+      powerSyncJwtIssuer: env.powerSyncJwtIssuer,
+      powerSyncJwtAudience: env.powerSyncJwtAudience,
     };
 
     return config;

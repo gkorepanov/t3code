@@ -9,12 +9,14 @@ import type {
 import type { KnownEnvironment } from "@t3tools/client-runtime";
 
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import type { RemotePowerSyncState } from "../powersync/connection";
 
 export interface EnvironmentConnection {
   readonly kind: "primary" | "saved";
   readonly environmentId: EnvironmentId;
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
+  readonly remoteState?: RemotePowerSyncState;
   readonly ensureBootstrapped: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
   readonly dispose: () => Promise<void>;
@@ -37,6 +39,8 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
   readonly refreshMetadata?: () => Promise<void>;
+  readonly remoteState?: RemotePowerSyncState;
+  readonly orchestrationSync?: "websocket" | "external";
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
 }
@@ -124,24 +128,42 @@ export function createEnvironmentConnection(
       )
     : () => undefined;
 
-  const unsubShell = input.client.orchestration.subscribeShell(
-    (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeShell"]>[0]>[0]) => {
-      if (item.kind === "snapshot") {
-        input.syncShellSnapshot(item.snapshot, environmentId);
-        bootstrapGate.resolve();
-        return;
-      }
-      input.applyShellEvent(item, environmentId);
-    },
-    {
-      onResubscribe: () => {
-        if (disposed) {
-          return;
+  const unsubShell =
+    input.orchestrationSync === "external"
+      ? () => undefined
+      : input.client.orchestration.subscribeShell(
+          (item: Parameters<Parameters<WsRpcClient["orchestration"]["subscribeShell"]>[0]>[0]) => {
+            if (item.kind === "snapshot") {
+              input.syncShellSnapshot(item.snapshot, environmentId);
+              bootstrapGate.resolve();
+              return;
+            }
+            input.applyShellEvent(item, environmentId);
+          },
+          {
+            onResubscribe: () => {
+              if (disposed) {
+                return;
+              }
+              bootstrapGate.reset();
+            },
+          },
+        );
+
+  if (input.orchestrationSync === "external") {
+    void input.remoteState?.ensureBootstrapped().then(
+      () => {
+        if (!disposed) {
+          bootstrapGate.resolve();
         }
-        bootstrapGate.reset();
       },
-    },
-  );
+      (error) => {
+        if (!disposed) {
+          bootstrapGate.reject(error);
+        }
+      },
+    );
+  }
 
   const unsubTerminalEvent = input.client.terminal.onEvent(
     (event: Parameters<Parameters<WsRpcClient["terminal"]["onEvent"]>[0]>[0]) => {
@@ -162,12 +184,17 @@ export function createEnvironmentConnection(
     environmentId,
     knownEnvironment: input.knownEnvironment,
     client: input.client,
+    ...(input.remoteState ? { remoteState: input.remoteState } : {}),
     ensureBootstrapped: () => bootstrapGate.wait(),
     reconnect: async () => {
       bootstrapGate.reset();
       try {
-        await input.client.reconnect();
+        await Promise.all([input.client.reconnect(), input.remoteState?.reconnect()]);
         await input.refreshMetadata?.();
+        if (input.orchestrationSync === "external") {
+          await input.remoteState?.ensureBootstrapped();
+          bootstrapGate.resolve();
+        }
         await bootstrapGate.wait();
       } catch (error) {
         bootstrapGate.reject(error);
@@ -176,7 +203,7 @@ export function createEnvironmentConnection(
     },
     dispose: async () => {
       cleanup();
-      await input.client.dispose();
+      await Promise.all([input.client.dispose(), input.remoteState?.dispose()]);
     },
   };
 }

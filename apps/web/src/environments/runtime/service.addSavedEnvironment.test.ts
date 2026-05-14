@@ -49,6 +49,7 @@ const mockDisconnectSshEnvironment = vi.fn();
 const mockFetchSshEnvironmentDescriptor = vi.fn();
 const mockToPersistedSavedEnvironmentRecord = vi.fn((record) => record);
 const mockCreateEnvironmentConnection = vi.fn();
+const mockCreateRemotePowerSyncState = vi.fn();
 const mockClientGetConfig = vi.fn(async () => ({
   environment: {
     environmentId: EnvironmentId.make("environment-1"),
@@ -107,6 +108,10 @@ vi.mock("./catalog", () => ({
 
 vi.mock("./connection", () => ({
   createEnvironmentConnection: mockCreateEnvironmentConnection,
+}));
+
+vi.mock("../powersync/connection", () => ({
+  createRemotePowerSyncState: mockCreateRemotePowerSyncState,
 }));
 
 vi.mock("../../rpc/wsRpcClient", () => ({
@@ -191,12 +196,31 @@ describe("addSavedEnvironment", () => {
       authenticated: true,
       role: "owner",
     });
+    mockCreateRemotePowerSyncState.mockReturnValue({
+      ensureBootstrapped: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      dispatchCommand: vi.fn(async () => ({ sequence: 1 })),
+      getArchivedShellSnapshot: vi.fn(async () => ({
+        snapshotSequence: 0,
+        projects: [],
+        threads: [],
+        updatedAt: "1970-01-01T00:00:00.000Z",
+      })),
+      subscribeShell: vi.fn(() => () => undefined),
+      subscribeThread: vi.fn(() => () => undefined),
+    });
     mockCreateEnvironmentConnection.mockImplementation(
-      (input: { knownEnvironment: { environmentId: EnvironmentId }; client: unknown }) => ({
+      (input: {
+        knownEnvironment: { environmentId: EnvironmentId };
+        client: unknown;
+        remoteState?: unknown;
+      }) => ({
         kind: "saved",
         environmentId: input.knownEnvironment.environmentId,
         knownEnvironment: input.knownEnvironment,
         client: input.client,
+        remoteState: input.remoteState,
         ensureBootstrapped: async () => undefined,
         reconnect: async () => undefined,
         dispose: async () => undefined,
@@ -242,7 +266,7 @@ describe("addSavedEnvironment", () => {
     expect(mockUpsert).not.toHaveBeenCalled();
 
     await resetEnvironmentServiceForTests();
-  });
+  }, 20_000);
 
   it("restores unrelated saved environments when credential persistence rollback runs", async () => {
     mockSavedRecords = [

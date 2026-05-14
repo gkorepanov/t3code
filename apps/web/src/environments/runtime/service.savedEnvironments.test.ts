@@ -10,6 +10,7 @@ const mockListSavedEnvironmentRecords = vi.fn();
 const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockReadSavedEnvironmentBearerToken = vi.fn();
 const mockGetSavedEnvironmentRecord = vi.fn();
+const mockCreateRemotePowerSyncState = vi.fn();
 
 function MockWsTransport() {
   return undefined;
@@ -25,6 +26,13 @@ vi.mock("../primary", () => ({
       wsBaseUrl: "ws://127.0.0.1:3000/",
     },
     environmentId: EnvironmentId.make("env-1"),
+  })),
+  readPrimaryEnvironmentDescriptor: vi.fn(() => ({
+    environmentId: EnvironmentId.make("env-1"),
+    label: "Primary environment",
+    platform: { os: "darwin", arch: "arm64" },
+    serverVersion: "0.0.0-test",
+    capabilities: { repositoryIdentity: true, powerSync: false },
   })),
 }));
 
@@ -64,6 +72,10 @@ vi.mock("./catalog", () => ({
 
 vi.mock("./connection", () => ({
   createEnvironmentConnection: mockCreateEnvironmentConnection,
+}));
+
+vi.mock("../powersync/connection", () => ({
+  createRemotePowerSyncState: mockCreateRemotePowerSyncState,
 }));
 
 vi.mock("../../rpc/wsRpcClient", () => ({
@@ -235,6 +247,20 @@ describe("saved environment startup", () => {
     mockSavedEnvironmentRegistrySubscribe.mockReturnValue(() => undefined);
     mockWaitForSavedEnvironmentRegistryHydration.mockResolvedValue(undefined);
     mockReadSavedEnvironmentBearerToken.mockResolvedValue("saved-bearer-token");
+    mockCreateRemotePowerSyncState.mockReturnValue({
+      ensureBootstrapped: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+      dispatchCommand: vi.fn(async () => ({ sequence: 1 })),
+      getArchivedShellSnapshot: vi.fn(async () => ({
+        snapshotSequence: 0,
+        projects: [],
+        threads: [],
+        updatedAt: "1970-01-01T00:00:00.000Z",
+      })),
+      subscribeShell: vi.fn(() => () => undefined),
+      subscribeThread: vi.fn(() => () => undefined),
+    });
     mockCreateWsRpcClient.mockImplementation(() => createClient());
     mockCreateEnvironmentConnection.mockImplementation((input) => {
       if (input.kind === "saved") {
@@ -248,6 +274,7 @@ describe("saved environment startup", () => {
         environmentId: input.knownEnvironment.environmentId,
         knownEnvironment: input.knownEnvironment,
         client: input.client,
+        remoteState: input.remoteState,
         ensureBootstrapped: vi.fn(async () => undefined),
         reconnect: vi.fn(async () => undefined),
         dispose: vi.fn(async () => undefined),

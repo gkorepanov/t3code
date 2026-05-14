@@ -42,7 +42,7 @@ describe("DesktopSshRemoteApi", () => {
           label: "Remote Devbox",
           platform: { os: "linux", arch: "x64" },
           serverVersion: "1.2.3",
-          capabilities: { repositoryIdentity: true },
+          capabilities: { repositoryIdentity: true, powerSync: false },
         });
       }),
     );

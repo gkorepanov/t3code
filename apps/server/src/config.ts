@@ -73,6 +73,11 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly databaseUrl?: string | undefined;
+  readonly powerSyncUrl?: string | undefined;
+  readonly powerSyncJwtPrivateKey?: string | undefined;
+  readonly powerSyncJwtIssuer?: string | undefined;
+  readonly powerSyncJwtAudience?: string | undefined;
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -168,6 +173,11 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           logWebSocketEvents: false,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          databaseUrl: undefined,
+          powerSyncUrl: undefined,
+          powerSyncJwtPrivateKey: undefined,
+          powerSyncJwtIssuer: "t3code",
+          powerSyncJwtAudience: "powersync",
           port: 0,
           host: undefined,
           desktopBootstrapToken: undefined,
@@ -200,3 +210,9 @@ export const resolveStaticDir = Effect.fn(function* () {
   }
   return undefined;
 });
+
+export function isPowerSyncConfigured(
+  config: Pick<ServerConfigShape, "databaseUrl" | "powerSyncUrl" | "powerSyncJwtPrivateKey">,
+): boolean {
+  return Boolean(config.databaseUrl && config.powerSyncUrl && config.powerSyncJwtPrivateKey);
+}

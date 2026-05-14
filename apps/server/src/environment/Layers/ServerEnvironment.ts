@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Random from "effect/Random";
 
-import { ServerConfig } from "../../config.ts";
+import { isPowerSyncConfigured, ServerConfig } from "../../config.ts";
 import { layer as ProcessRunnerLive } from "../../processRunner.ts";
 import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
 import packageJson from "../../../package.json" with { type: "json" };
@@ -85,6 +85,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     serverVersion: packageJson.version,
     capabilities: {
       repositoryIdentity: true,
+      powerSync: isPowerSyncConfigured(serverConfig),
     },
   };
 

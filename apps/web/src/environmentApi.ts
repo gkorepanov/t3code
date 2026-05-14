@@ -1,11 +1,14 @@
 import type { EnvironmentId, EnvironmentApi } from "@t3tools/contracts";
 
 import type { WsRpcClient } from "./rpc/wsRpcClient";
-import { readEnvironmentConnection } from "./environments/runtime";
+import { readEnvironmentConnection, type EnvironmentConnection } from "./environments/runtime";
 
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();
 
-export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
+export function createEnvironmentApi(
+  rpcClient: WsRpcClient,
+  remoteState?: EnvironmentConnection["remoteState"],
+): EnvironmentApi {
   return {
     terminal: {
       open: (input) => rpcClient.terminal.open(input as never),
@@ -44,13 +47,16 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
     },
     orchestration: {
-      dispatchCommand: rpcClient.orchestration.dispatchCommand,
+      dispatchCommand: remoteState?.dispatchCommand ?? rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
-      getArchivedShellSnapshot: rpcClient.orchestration.getArchivedShellSnapshot,
+      getArchivedShellSnapshot:
+        remoteState?.getArchivedShellSnapshot ?? rpcClient.orchestration.getArchivedShellSnapshot,
       subscribeShell: (callback, options) =>
+        remoteState?.subscribeShell(callback) ??
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>
+        remoteState?.subscribeThread(input, callback) ??
         rpcClient.orchestration.subscribeThread(input, callback, options),
     },
   };
@@ -71,7 +77,7 @@ export function readEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi
   }
 
   const connection = readEnvironmentConnection(environmentId);
-  return connection ? createEnvironmentApi(connection.client) : undefined;
+  return connection ? createEnvironmentApi(connection.client, connection.remoteState) : undefined;
 }
 
 export function ensureEnvironmentApi(environmentId: EnvironmentId): EnvironmentApi {

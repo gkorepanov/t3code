@@ -47,6 +47,14 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     otlpServiceName: "t3-server",
   } as const;
 
+  const defaultRemoteSyncConfig = {
+    databaseUrl: undefined,
+    powerSyncUrl: undefined,
+    powerSyncJwtPrivateKey: undefined,
+    powerSyncJwtIssuer: "t3code",
+    powerSyncJwtAudience: "powersync",
+  } as const;
+
   const openBootstrapFd = Effect.fn(function* (payload: DesktopBackendBootstrapValue) {
     const fs = yield* FileSystem.FileSystem;
     const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-", suffix: ".ndjson" });
@@ -103,6 +111,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Warn",
         ...defaultObservabilityConfig,
+        ...defaultRemoteSyncConfig,
         mode: "desktop",
         port: 4001,
         cwd: process.cwd(),
@@ -169,6 +178,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
+        ...defaultRemoteSyncConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -238,6 +248,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultRemoteSyncConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -310,6 +321,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultRemoteSyncConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -437,6 +449,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Debug",
         ...defaultObservabilityConfig,
+        ...defaultRemoteSyncConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),
@@ -504,6 +517,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultRemoteSyncConfig,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         mode: "desktop",
@@ -569,6 +583,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        ...defaultRemoteSyncConfig,
         mode: "web",
         port: 3773,
         cwd: process.cwd(),
