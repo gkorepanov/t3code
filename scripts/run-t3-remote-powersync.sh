@@ -20,7 +20,6 @@ T3_PORT="${T3_PORT:-3773}"
 PS_PORT="${PS_PORT:-8080}"
 PG_PORT="${PG_PORT:-54329}"
 T3_HOME="${T3_HOME:-$HOME/.t3code-remote}"
-POWERSYNC_IMAGE="${POWERSYNC_IMAGE:-journeyapps/powersync-service:1.20.5}"
 
 ENGINE="${CONTAINER_ENGINE:-}"
 if [ -z "$ENGINE" ]; then
@@ -32,6 +31,16 @@ if [ -z "$ENGINE" ]; then
     echo "Install docker or podman"
     exit 1
   fi
+fi
+
+if [ "$ENGINE" = "podman" ]; then
+  POSTGRES_IMAGE="${POSTGRES_IMAGE:-docker.io/library/postgres:16-alpine}"
+  POWERSYNC_IMAGE="${POWERSYNC_IMAGE:-docker.io/journeyapps/powersync-service:1.20.5}"
+  USE_HOST_NETWORK=1
+else
+  POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
+  POWERSYNC_IMAGE="${POWERSYNC_IMAGE:-journeyapps/powersync-service:1.20.5}"
+  USE_HOST_NETWORK=0
 fi
 
 command -v bun >/dev/null 2>&1 || {
@@ -74,15 +83,28 @@ NETWORK=t3code-net
 PG_NAME=t3code-postgres
 PS_NAME=t3code-powersync
 
-$ENGINE network inspect "$NETWORK" >/dev/null 2>&1 || $ENGINE network create "$NETWORK" >/dev/null
+if [ "$USE_HOST_NETWORK" = "0" ]; then
+  $ENGINE network inspect "$NETWORK" >/dev/null 2>&1 || $ENGINE network create "$NETWORK" >/dev/null
+fi
+
+if [ "$USE_HOST_NETWORK" = "1" ]; then
+  $ENGINE rm -f "$PG_NAME" >/dev/null 2>&1 || true
+fi
 
 if ! $ENGINE container inspect "$PG_NAME" >/dev/null 2>&1; then
-  $ENGINE run -d --name "$PG_NAME" --network "$NETWORK" \
-    -p "127.0.0.1:${PG_PORT}:5432" \
+  PG_NETWORK_ARGS=(--network "$NETWORK" -p "127.0.0.1:${PG_PORT}:5432")
+  PG_PORT_ARGS=()
+  if [ "$USE_HOST_NETWORK" = "1" ]; then
+    PG_NETWORK_ARGS=(--network host)
+    PG_PORT_ARGS=(-c "port=${PG_PORT}" -c "listen_addresses=127.0.0.1")
+  fi
+
+  $ENGINE run -d --name "$PG_NAME" "${PG_NETWORK_ARGS[@]}" \
     -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
     -e POSTGRES_DB=t3code \
     -v t3code-postgres-data:/var/lib/postgresql/data \
-    postgres:16-alpine \
+    "$POSTGRES_IMAGE" \
+    "${PG_PORT_ARGS[@]}" \
     -c wal_level=logical \
     -c max_replication_slots=16 \
     -c max_wal_senders=16 >/dev/null
@@ -90,19 +112,19 @@ else
   $ENGINE start "$PG_NAME" >/dev/null
 fi
 
-until $ENGINE exec "$PG_NAME" pg_isready -U postgres >/dev/null 2>&1; do
+until $ENGINE exec "$PG_NAME" pg_isready -U postgres -h 127.0.0.1 -p "$PG_PORT" >/dev/null 2>&1; do
   sleep 1
 done
 
-if ! $ENGINE exec "$PG_NAME" psql -U postgres -d postgres -tAc \
+if ! $ENGINE exec "$PG_NAME" psql -U postgres -h 127.0.0.1 -p "$PG_PORT" -d postgres -tAc \
   "SELECT 1 FROM pg_database WHERE datname='powersync_storage'" | grep -q 1; then
-  $ENGINE exec "$PG_NAME" createdb -U postgres powersync_storage
+  $ENGINE exec "$PG_NAME" createdb -U postgres -h 127.0.0.1 -p "$PG_PORT" powersync_storage
 fi
 
-if [ ! -f apps/server/dist/bin.mjs ] || [ ! -f apps/server/dist/client/index.html ]; then
+if [ "${T3_SKIP_BUILD:-0}" != "1" ]; then
   bun install --frozen-lockfile
-  bun --cwd apps/web run build
-  bun --cwd apps/server run build
+  (cd apps/web && bun run build)
+  (cd apps/server && bun run build)
 fi
 
 export T3CODE_DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${PG_PORT}/t3code"
@@ -116,11 +138,11 @@ node apps/server/dist/bin.mjs serve --host 0.0.0.0 --port "$T3_PORT" --base-dir 
 T3_PID=$!
 trap 'kill "$T3_PID" 2>/dev/null || true' EXIT INT TERM
 
-until curl -fsS "http://127.0.0.1:${T3_PORT}/.well-known/t3/environment" >/dev/null; do
+until curl --max-time 5 -fsS "http://127.0.0.1:${T3_PORT}/.well-known/t3/environment" >/dev/null; do
   sleep 1
 done
 
-$ENGINE exec "$PG_NAME" psql -U postgres -d t3code -v ON_ERROR_STOP=1 -c \
+$ENGINE exec "$PG_NAME" psql -U postgres -h 127.0.0.1 -p "$PG_PORT" -d t3code -v ON_ERROR_STOP=1 -c \
   "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'powersync') THEN CREATE PUBLICATION powersync FOR ALL TABLES; END IF; END \$\$;"
 
 HOST_INTERNAL=host.containers.internal
@@ -128,6 +150,17 @@ ADD_HOST_ARGS=()
 if [ "$ENGINE" = "docker" ]; then
   HOST_INTERNAL=host.docker.internal
   ADD_HOST_ARGS=(--add-host host.docker.internal:host-gateway)
+elif [ "$USE_HOST_NETWORK" = "1" ]; then
+  HOST_INTERNAL=127.0.0.1
+fi
+
+PS_DB_HOST="$PG_NAME"
+PS_DB_PORT=5432
+PS_NETWORK_ARGS=(--network "$NETWORK" -p "${PS_PORT}:8080")
+if [ "$USE_HOST_NETWORK" = "1" ]; then
+  PS_DB_HOST=127.0.0.1
+  PS_DB_PORT="$PG_PORT"
+  PS_NETWORK_ARGS=(--network host)
 fi
 
 cat >"$T3_HOME/powersync/service.yaml" <<EOF
@@ -136,11 +169,11 @@ telemetry:
 replication:
   connections:
     - type: postgresql
-      uri: postgresql://postgres:${POSTGRES_PASSWORD}@${PG_NAME}:5432/t3code
+      uri: postgresql://postgres:${POSTGRES_PASSWORD}@${PS_DB_HOST}:${PS_DB_PORT}/t3code
       sslmode: disable
 storage:
   type: postgresql
-  uri: postgresql://postgres:${POSTGRES_PASSWORD}@${PG_NAME}:5432/powersync_storage
+  uri: postgresql://postgres:${POSTGRES_PASSWORD}@${PS_DB_HOST}:${PS_DB_PORT}/powersync_storage
   sslmode: disable
 port: 8080
 sync_config:
@@ -160,13 +193,12 @@ EOF
 cp powersync/sync-rules.yaml "$T3_HOME/powersync/sync-rules.yaml"
 
 $ENGINE rm -f "$PS_NAME" >/dev/null 2>&1 || true
-$ENGINE run -d --name "$PS_NAME" --network "$NETWORK" \
+$ENGINE run -d --name "$PS_NAME" "${PS_NETWORK_ARGS[@]}" \
   "${ADD_HOST_ARGS[@]}" \
-  -p "${PS_PORT}:8080" \
   -v "$T3_HOME/powersync:/config:ro" \
   "$POWERSYNC_IMAGE" start -c /config/service.yaml >/dev/null
 
-until curl -fsS "http://127.0.0.1:${PS_PORT}/probes/liveness" >/dev/null; do
+until curl --max-time 5 -fsS "http://127.0.0.1:${PS_PORT}/probes/liveness" >/dev/null; do
   sleep 1
 done
 
