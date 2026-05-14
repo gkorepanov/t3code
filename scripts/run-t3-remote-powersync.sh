@@ -5,6 +5,7 @@ set -euo pipefail
 #
 # Usage:
 #   PUBLIC_HOST=your.server.ip.or.domain bash scripts/run-t3-remote-powersync.sh
+#   LOCAL_ONLY=1 bash scripts/run-t3-remote-powersync.sh
 #
 # Ports:
 #   3773 = t3 serve
@@ -15,7 +16,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-PUBLIC_HOST="${PUBLIC_HOST:-$(hostname -I | awk '{print $1}')}"
+LOCAL_ONLY="${LOCAL_ONLY:-0}"
+if [ "$LOCAL_ONLY" = "1" ]; then
+  PUBLIC_HOST="${PUBLIC_HOST:-127.0.0.1}"
+  T3_HOST="${T3_HOST:-127.0.0.1}"
+else
+  PUBLIC_HOST="${PUBLIC_HOST:-$(hostname -I | awk '{print $1}')}"
+  T3_HOST="${T3_HOST:-0.0.0.0}"
+fi
 T3_PORT="${T3_PORT:-3773}"
 PS_PORT="${PS_PORT:-8080}"
 PG_PORT="${PG_PORT:-54329}"
@@ -36,11 +44,18 @@ fi
 if [ "$ENGINE" = "podman" ]; then
   POSTGRES_IMAGE="${POSTGRES_IMAGE:-docker.io/library/postgres:16-alpine}"
   POWERSYNC_IMAGE="${POWERSYNC_IMAGE:-docker.io/journeyapps/powersync-service:1.20.5}"
-  USE_HOST_NETWORK=1
+  if [ "$LOCAL_ONLY" = "1" ]; then
+    USE_HOST_NETWORK=0
+    NETWORK=podman
+  else
+    USE_HOST_NETWORK=1
+    NETWORK=t3code-net
+  fi
 else
   POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
   POWERSYNC_IMAGE="${POWERSYNC_IMAGE:-journeyapps/powersync-service:1.20.5}"
   USE_HOST_NETWORK=0
+  NETWORK=t3code-net
 fi
 
 command -v bun >/dev/null 2>&1 || {
@@ -79,11 +94,10 @@ if [ ! -f "$KEY_FILE" ]; then
   chmod 600 "$KEY_FILE"
 fi
 
-NETWORK=t3code-net
 PG_NAME=t3code-postgres
 PS_NAME=t3code-powersync
 
-if [ "$USE_HOST_NETWORK" = "0" ]; then
+if [ "$USE_HOST_NETWORK" = "0" ] && [ "$NETWORK" != "podman" ]; then
   $ENGINE network inspect "$NETWORK" >/dev/null 2>&1 || $ENGINE network create "$NETWORK" >/dev/null
 fi
 
@@ -94,6 +108,9 @@ fi
 if ! $ENGINE container inspect "$PG_NAME" >/dev/null 2>&1; then
   PG_NETWORK_ARGS=(--network "$NETWORK" -p "127.0.0.1:${PG_PORT}:5432")
   PG_PORT_ARGS=()
+  if [ "$ENGINE" = "podman" ] && [ "$LOCAL_ONLY" = "1" ]; then
+    PG_NETWORK_ARGS=(--network "$NETWORK" -p "127.0.0.1:${PG_PORT}:5432")
+  fi
   if [ "$USE_HOST_NETWORK" = "1" ]; then
     PG_NETWORK_ARGS=(--network host)
     PG_PORT_ARGS=(-c "port=${PG_PORT}" -c "listen_addresses=127.0.0.1")
@@ -134,7 +151,7 @@ export T3CODE_POWERSYNC_JWT_ISSUER="t3code"
 export T3CODE_POWERSYNC_JWT_AUDIENCE="powersync"
 export T3CODE_NO_BROWSER=1
 
-node apps/server/dist/bin.mjs serve --host 0.0.0.0 --port "$T3_PORT" --base-dir "$T3_HOME" &
+node apps/server/dist/bin.mjs serve --host "$T3_HOST" --port "$T3_PORT" --base-dir "$T3_HOME" &
 T3_PID=$!
 trap 'kill "$T3_PID" 2>/dev/null || true' EXIT INT TERM
 
@@ -157,6 +174,13 @@ fi
 PS_DB_HOST="$PG_NAME"
 PS_DB_PORT=5432
 PS_NETWORK_ARGS=(--network "$NETWORK" -p "${PS_PORT}:8080")
+if [ "$LOCAL_ONLY" = "1" ]; then
+  PS_NETWORK_ARGS=(--network "$NETWORK" -p "127.0.0.1:${PS_PORT}:8080")
+  if [ "$ENGINE" = "podman" ]; then
+    PS_DB_HOST=host.containers.internal
+    PS_DB_PORT="$PG_PORT"
+  fi
+fi
 if [ "$USE_HOST_NETWORK" = "1" ]; then
   PS_DB_HOST=127.0.0.1
   PS_DB_PORT="$PG_PORT"
