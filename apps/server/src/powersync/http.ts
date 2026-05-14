@@ -18,8 +18,7 @@ import { SignJWT } from "jose";
 import { respondToAuthError } from "../auth/http.ts";
 import { AuthError, type AuthenticatedSession, ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { ServerConfig } from "../config.ts";
-import { normalizeDispatchCommand } from "../orchestration/Normalizer.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { dispatchClientOrchestrationCommand } from "../orchestration/dispatch.ts";
 
 const POWERSYNC_JWT_KID = "t3code-powersync-rs256";
 const POWERSYNC_TOKEN_TTL_SECONDS = 55 * 60;
@@ -284,18 +283,7 @@ function processClientCommandRow(input: {
     }
 
     const command = yield* parseCommandJson(input.row.commandJson);
-    const orchestrationEngine = yield* OrchestrationEngineService;
-    const normalizedCommand = yield* normalizeDispatchCommand(command).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Failed to normalize PowerSync orchestration command.",
-            status: 400,
-            cause,
-          }),
-      ),
-    );
-    const result = yield* orchestrationEngine.dispatch(normalizedCommand).pipe(
+    const result = yield* dispatchClientOrchestrationCommand(command).pipe(
       Effect.mapError(
         (cause) =>
           new AuthError({
