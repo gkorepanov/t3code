@@ -46,7 +46,7 @@ if [ "$ENGINE" = "podman" ]; then
   POWERSYNC_IMAGE="${POWERSYNC_IMAGE:-docker.io/journeyapps/powersync-service:1.20.5}"
   if [ "$LOCAL_ONLY" = "1" ]; then
     USE_HOST_NETWORK=0
-    NETWORK=podman
+    NETWORK="slirp4netns:allow_host_loopback=true"
   else
     USE_HOST_NETWORK=1
     NETWORK=t3code-net
@@ -97,7 +97,7 @@ fi
 PG_NAME=t3code-postgres
 PS_NAME=t3code-powersync
 
-if [ "$USE_HOST_NETWORK" = "0" ] && [ "$NETWORK" != "podman" ]; then
+if [ "$USE_HOST_NETWORK" = "0" ] && [[ "$NETWORK" != slirp4netns:* ]]; then
   $ENGINE network inspect "$NETWORK" >/dev/null 2>&1 || $ENGINE network create "$NETWORK" >/dev/null
 fi
 
@@ -105,15 +105,18 @@ if [ "$USE_HOST_NETWORK" = "1" ]; then
   $ENGINE rm -f "$PG_NAME" >/dev/null 2>&1 || true
 fi
 
+if [ "$ENGINE" = "podman" ] && [ "$LOCAL_ONLY" = "1" ]; then
+  $ENGINE rm -f "$PS_NAME" "$PG_NAME" >/dev/null 2>&1 || true
+fi
+
+PG_CONTAINER_PORT=5432
 if ! $ENGINE container inspect "$PG_NAME" >/dev/null 2>&1; then
   PG_NETWORK_ARGS=(--network "$NETWORK" -p "127.0.0.1:${PG_PORT}:5432")
   PG_PORT_ARGS=()
-  if [ "$ENGINE" = "podman" ] && [ "$LOCAL_ONLY" = "1" ]; then
-    PG_NETWORK_ARGS=(--network "$NETWORK" -p "127.0.0.1:${PG_PORT}:5432")
-  fi
   if [ "$USE_HOST_NETWORK" = "1" ]; then
     PG_NETWORK_ARGS=(--network host)
     PG_PORT_ARGS=(-c "port=${PG_PORT}" -c "listen_addresses=127.0.0.1")
+    PG_CONTAINER_PORT="$PG_PORT"
   fi
 
   $ENGINE run -d --name "$PG_NAME" "${PG_NETWORK_ARGS[@]}" \
@@ -129,13 +132,13 @@ else
   $ENGINE start "$PG_NAME" >/dev/null
 fi
 
-until $ENGINE exec "$PG_NAME" pg_isready -U postgres -h 127.0.0.1 -p "$PG_PORT" >/dev/null 2>&1; do
+until $ENGINE exec "$PG_NAME" pg_isready -U postgres -h 127.0.0.1 -p "$PG_CONTAINER_PORT" >/dev/null 2>&1; do
   sleep 1
 done
 
-if ! $ENGINE exec "$PG_NAME" psql -U postgres -h 127.0.0.1 -p "$PG_PORT" -d postgres -tAc \
+if ! $ENGINE exec "$PG_NAME" psql -U postgres -h 127.0.0.1 -p "$PG_CONTAINER_PORT" -d postgres -tAc \
   "SELECT 1 FROM pg_database WHERE datname='powersync_storage'" | grep -q 1; then
-  $ENGINE exec "$PG_NAME" createdb -U postgres -h 127.0.0.1 -p "$PG_PORT" powersync_storage
+  $ENGINE exec "$PG_NAME" createdb -U postgres -h 127.0.0.1 -p "$PG_CONTAINER_PORT" powersync_storage
 fi
 
 if [ "${T3_SKIP_BUILD:-0}" != "1" ]; then
@@ -153,22 +156,29 @@ export T3CODE_NO_BROWSER=1
 
 node apps/server/dist/bin.mjs serve --host "$T3_HOST" --port "$T3_PORT" --base-dir "$T3_HOME" &
 T3_PID=$!
-trap 'kill "$T3_PID" 2>/dev/null || true' EXIT INT TERM
+cleanup() {
+  kill "$T3_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 
 until curl --max-time 5 -fsS "http://127.0.0.1:${T3_PORT}/.well-known/t3/environment" >/dev/null; do
   sleep 1
 done
 
-$ENGINE exec "$PG_NAME" psql -U postgres -h 127.0.0.1 -p "$PG_PORT" -d t3code -v ON_ERROR_STOP=1 -c \
+$ENGINE exec "$PG_NAME" psql -U postgres -h 127.0.0.1 -p "$PG_CONTAINER_PORT" -d t3code -v ON_ERROR_STOP=1 -c \
   "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'powersync') THEN CREATE PUBLICATION powersync FOR ALL TABLES; END IF; END \$\$;"
 
 HOST_INTERNAL=host.containers.internal
+JWKS_HOST="$HOST_INTERNAL"
+JWKS_PORT="$T3_PORT"
 ADD_HOST_ARGS=()
 if [ "$ENGINE" = "docker" ]; then
   HOST_INTERNAL=host.docker.internal
+  JWKS_HOST="$HOST_INTERNAL"
   ADD_HOST_ARGS=(--add-host host.docker.internal:host-gateway)
 elif [ "$USE_HOST_NETWORK" = "1" ]; then
   HOST_INTERNAL=127.0.0.1
+  JWKS_HOST="$HOST_INTERNAL"
 fi
 
 PS_DB_HOST="$PG_NAME"
@@ -203,7 +213,7 @@ port: 8080
 sync_config:
   path: /config/sync-rules.yaml
 client_auth:
-  jwks_uri: http://${HOST_INTERNAL}:${T3_PORT}/api/powersync/jwks
+  jwks_uri: http://${JWKS_HOST}:${JWKS_PORT}/api/powersync/jwks
   audience: ["powersync", "t3code-powersync"]
 api:
   tokens:
