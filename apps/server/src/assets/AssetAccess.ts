@@ -1,6 +1,8 @@
 import type { AssetResource } from "@t3tools/contracts";
 import {
   AssetAttachmentNotFoundError,
+  AssetFilesystemAssetInspectionError,
+  AssetFilesystemAssetNotFoundError,
   AssetPreviewTypeValidationError,
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
@@ -44,7 +46,7 @@ export const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/
 
 const SIGNING_SECRET_NAME = "asset-access-signing-key";
 const ASSET_TOKEN_TTL_MS = 60 * 60 * 1000;
-const PREVIEW_ASSET_EXTENSIONS = new Set([
+const PREVIEW_ASSET_EXTENSIONS: ReadonlySet<string> = new Set([
   ...WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
   ...WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
   ".css",
@@ -54,6 +56,10 @@ const PREVIEW_ASSET_EXTENSIONS = new Set([
   ".ttf",
   ".woff",
   ".woff2",
+]);
+const BROWSER_NATIVE_PREVIEW_EXTENSIONS: ReadonlySet<string> = new Set([
+  ...WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
+  ...WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
 ]);
 
 const AssetClaimsSchema = Schema.Union([
@@ -69,6 +75,13 @@ const AssetClaimsSchema = Schema.Union([
     kind: Schema.Literal("workspace-file-exact"),
     workspaceRoot: Schema.String,
     relativePath: Schema.String,
+    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("filesystem-file"),
+    baseDirectory: Schema.String,
+    entryName: Schema.String,
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
@@ -92,7 +105,7 @@ const decodeAssetClaims = Schema.decodeUnknownOption(AssetClaimsJson);
 const encodeAssetClaims = Schema.encodeSync(AssetClaimsJson);
 
 export type ResolvedAsset =
-  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "file"; readonly path: string; readonly contentType?: string }
   | { readonly kind: "project-favicon-fallback" };
 
 function decodeClaims(encodedPayload: string): AssetClaims | null {
@@ -163,6 +176,28 @@ const resolveCanonicalWorkspaceFileForRequest = (input: {
     ),
     Effect.orElseSucceed(() => null),
   );
+
+const resolveCanonicalFilesystemFile = Effect.fn("AssetAccess.resolveCanonicalFilesystemFile")(
+  function* (filePath: string) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const info = yield* optionOnNotFound(fileSystem.stat(filePath));
+    if (Option.isNone(info) || info.value.type !== "File") return null;
+    return yield* fileSystem.realPath(filePath);
+  },
+);
+
+function standaloneFilesystemContentType(filePath: string, path: Path.Path): string | undefined {
+  const extension = path.extname(filePath).toLowerCase();
+  if (BROWSER_NATIVE_PREVIEW_EXTENSIONS.has(extension)) {
+    return undefined;
+  }
+  return "text/plain; charset=utf-8";
+}
+
+function isPathInsideDirectory(path: Path.Path, directory: string, candidate: string): boolean {
+  const relative = path.relative(directory, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 
 export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (input: {
   readonly resource: AssetResource;
@@ -252,6 +287,33 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
             expiresAt,
           };
       fileName = path.basename(resolved.relativePath);
+      break;
+    }
+    case "filesystem-file": {
+      const canonicalFile = yield* resolveCanonicalFilesystemFile(
+        path.resolve(input.resource.path),
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AssetFilesystemAssetInspectionError({
+              resource: input.resource,
+              cause,
+            }),
+        ),
+      );
+      if (!canonicalFile) {
+        return yield* new AssetFilesystemAssetNotFoundError({
+          resource: input.resource,
+        });
+      }
+      fileName = path.basename(canonicalFile);
+      claims = {
+        version: 1,
+        kind: "filesystem-file",
+        baseDirectory: path.dirname(canonicalFile),
+        entryName: fileName,
+        expiresAt,
+      };
       break;
     }
     case "attachment": {
@@ -404,6 +466,39 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   const decodedPath = decodeRelativePath(relativePath);
   if (decodedPath === null) return null;
   const path = yield* Path.Path;
+  if (claims.kind === "filesystem-file") {
+    if (
+      decodedPath.length === 0 ||
+      decodedPath.includes("\0") ||
+      path.isAbsolute(decodedPath)
+    ) {
+      return null;
+    }
+    const candidate = path.resolve(claims.baseDirectory, decodedPath);
+    if (!isPathInsideDirectory(path, claims.baseDirectory, candidate)) {
+      return null;
+    }
+    const canonicalFile = yield* resolveCanonicalFilesystemFile(candidate).pipe(
+      Effect.tapError((cause) =>
+        Effect.logError("Failed to resolve filesystem asset path.", {
+          baseDirectory: claims.baseDirectory,
+          relativePath: decodedPath,
+          cause,
+        }),
+      ),
+      Effect.orElseSucceed(() => null),
+    );
+    if (!canonicalFile || !isPathInsideDirectory(path, claims.baseDirectory, canonicalFile)) {
+      return null;
+    }
+    return {
+      kind: "file",
+      path: canonicalFile,
+      ...(decodedPath === claims.entryName
+        ? { contentType: standaloneFilesystemContentType(canonicalFile, path) }
+        : {}),
+    } satisfies ResolvedAsset;
+  }
   if (claims.kind === "workspace-file-exact") {
     if (decodedPath !== path.basename(claims.relativePath)) return null;
     const exactWorkspaceFile = yield* resolveCanonicalWorkspaceFileForRequest({

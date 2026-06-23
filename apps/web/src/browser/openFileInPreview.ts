@@ -22,8 +22,7 @@ import {
 } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 
-export const isBrowserPreviewFile = (path: string): boolean =>
-  /\.(?:html?|pdf)$/i.test(path.split(/[?#]/, 1)[0] ?? "");
+export const isBrowserPreviewFile = (path: string): boolean => path.trim().length > 0;
 
 export class BrowserPreviewUnavailableError extends Data.TaggedError(
   "BrowserPreviewUnavailableError",
@@ -75,8 +74,7 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
     environmentId: input.threadRef.environmentId,
     input: {
       resource: {
-        _tag: "workspace-file",
-        threadId: input.threadRef.threadId,
+        _tag: "filesystem-file",
         path: input.filePath,
       },
     },

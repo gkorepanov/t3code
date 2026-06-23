@@ -10,6 +10,7 @@ import {
   WrapTextIcon,
 } from "lucide-react";
 import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import { isWorkspacePreviewEntryPath } from "@t3tools/shared/filePreview";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -721,6 +722,7 @@ interface MarkdownFileLinkProps {
   threadRef?: ScopedThreadRef | undefined;
   onOpen: (targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
+  preferBrowserPreview: boolean;
   className?: string | undefined;
 }
 
@@ -1000,6 +1002,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   threadRef,
   onOpen,
   onOpenInBrowser,
+  preferBrowserPreview,
   className,
 }: MarkdownFileLinkProps) {
   const handleOpenInEditor = useCallback(() => {
@@ -1179,7 +1182,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (onOpenInBrowser) {
+              if (preferBrowserPreview && onOpenInBrowser) {
                 handleOpenInBrowser();
                 return;
               }
@@ -1220,6 +1223,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.threadRef === next.threadRef &&
     previous.onOpen === next.onOpen &&
     previous.onOpenInBrowser === next.onOpenInBrowser &&
+    previous.preferBrowserPreview === next.preferBrowserPreview &&
     previous.className === next.className
   );
 }
@@ -1469,10 +1473,12 @@ function ChatMarkdown({
             theme={resolvedTheme}
             threadRef={threadRef}
             onOpen={openInPreferredEditor}
+            preferBrowserPreview={
+              !fileLinkMeta.workspaceRelativePath ||
+              isWorkspacePreviewEntryPath(fileLinkMeta.filePath)
+            }
             onOpenInBrowser={
-              threadRef &&
-              isPreviewSupportedInRuntime() &&
-              isBrowserPreviewFile(fileLinkMeta.filePath)
+              threadRef && isBrowserPreviewFile(fileLinkMeta.filePath)
                 ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
                 : undefined
             }

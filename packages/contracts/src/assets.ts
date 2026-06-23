@@ -9,6 +9,9 @@ export const AssetResource = Schema.Union([
     threadId: ThreadId,
     path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
   }),
+  Schema.TaggedStruct("filesystem-file", {
+    path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+  }),
   Schema.TaggedStruct("attachment", {
     attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
   }),
@@ -110,6 +113,29 @@ export class AssetWorkspaceAssetNotFoundError extends Schema.TaggedErrorClass<As
   }
 }
 
+export class AssetFilesystemAssetInspectionError extends Schema.TaggedErrorClass<AssetFilesystemAssetInspectionError>()(
+  "AssetFilesystemAssetInspectionError",
+  {
+    resource: AssetResource,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Failed to inspect the filesystem asset.";
+  }
+}
+
+export class AssetFilesystemAssetNotFoundError extends Schema.TaggedErrorClass<AssetFilesystemAssetNotFoundError>()(
+  "AssetFilesystemAssetNotFoundError",
+  {
+    resource: AssetResource,
+  },
+) {
+  override get message(): string {
+    return "Filesystem asset was not found.";
+  }
+}
+
 export class AssetWorkspaceResolutionError extends Schema.TaggedErrorClass<AssetWorkspaceResolutionError>()(
   "AssetWorkspaceResolutionError",
   {
@@ -188,6 +214,8 @@ export const AssetAccessError = Schema.Union([
   AssetPreviewTypeValidationError,
   AssetWorkspaceAssetInspectionError,
   AssetWorkspaceAssetNotFoundError,
+  AssetFilesystemAssetInspectionError,
+  AssetFilesystemAssetNotFoundError,
   AssetWorkspaceResolutionError,
   AssetAttachmentNotFoundError,
   AssetProjectFaviconResolutionError,

@@ -177,6 +177,43 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect("issues filesystem-wide URLs for files outside workspaces", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-filesystem-",
+      });
+      const sourcePath = path.join(directory, "script.ts");
+      const siblingPath = path.join(directory, "plot.png");
+      yield* fileSystem.writeFileString(sourcePath, "export const answer = 42;\n");
+      yield* fileSystem.writeFile(siblingPath, new Uint8Array([137, 80, 78, 71]));
+      const canonicalSourcePath = yield* fileSystem.realPath(sourcePath);
+      const canonicalSiblingPath = yield* fileSystem.realPath(siblingPath);
+
+      const result = yield* issueAssetUrl({
+        resource: {
+          _tag: "filesystem-file",
+          path: sourcePath,
+        },
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separatorIndex = suffix.indexOf("/");
+      const token = suffix.slice(0, separatorIndex);
+
+      expect(yield* resolveAsset(token, "script.ts")).toEqual({
+        kind: "file",
+        path: canonicalSourcePath,
+        contentType: "text/plain; charset=utf-8",
+      });
+      expect(yield* resolveAsset(token, "plot.png")).toEqual({
+        kind: "file",
+        path: canonicalSiblingPath,
+      });
+      expect(yield* resolveAsset(token, "../script.ts")).toBeNull();
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("issues exact attachment capabilities by attachment id", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
