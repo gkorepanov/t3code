@@ -112,10 +112,10 @@ describe("buildThreadTitlePrompt", () => {
 
     expect(result.prompt).toContain("User message:");
     expect(result.prompt).toContain("Investigate reconnect regressions after session restore");
-    expect(result.prompt).toContain("Every title must start with one or two emoji.");
-    expect(result.prompt).toContain("Emoji must be semantic and non-redundant");
+    expect(result.prompt).toContain("Every title must start with exactly one emoji.");
+    expect(result.prompt).toContain("Emoji must be semantic and add a useful clue");
     expect(result.prompt).toContain("Use the full typography toolbox");
-    expect(result.prompt).toContain("🏞️☰ FIX remote images in T3");
+    expect(result.prompt).toContain("🏞️ FIX remote images in T3");
     expect(result.prompt).toContain("🏞️🖼️ server images in the sidebar");
     expect(result.prompt).not.toContain("Attachment metadata:");
   });
