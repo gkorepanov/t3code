@@ -467,11 +467,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   if (decodedPath === null) return null;
   const path = yield* Path.Path;
   if (claims.kind === "filesystem-file") {
-    if (
-      decodedPath.length === 0 ||
-      decodedPath.includes("\0") ||
-      path.isAbsolute(decodedPath)
-    ) {
+    if (decodedPath.length === 0 || decodedPath.includes("\0") || path.isAbsolute(decodedPath)) {
       return null;
     }
     const candidate = path.resolve(claims.baseDirectory, decodedPath);
@@ -491,12 +487,14 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     if (!canonicalFile || !isPathInsideDirectory(path, claims.baseDirectory, canonicalFile)) {
       return null;
     }
+    const contentType =
+      decodedPath === claims.entryName
+        ? standaloneFilesystemContentType(canonicalFile, path)
+        : undefined;
     return {
       kind: "file",
       path: canonicalFile,
-      ...(decodedPath === claims.entryName
-        ? { contentType: standaloneFilesystemContentType(canonicalFile, path) }
-        : {}),
+      ...(contentType === undefined ? {} : { contentType }),
     } satisfies ResolvedAsset;
   }
   if (claims.kind === "workspace-file-exact") {
