@@ -9,7 +9,13 @@ import {
   Minimize2Icon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type {
+  AssetCreateUrlResult,
+  AssetResource,
+  EnvironmentId,
+  ScopedThreadRef,
+  ServerProviderSkill,
+} from "@t3tools/contracts";
 import { isWorkspacePreviewEntryPath } from "@t3tools/shared/filePreview";
 import {
   isAtomCommandInterrupted,
@@ -74,6 +80,7 @@ import { serverEnvironment } from "../state/server";
 import { assetEnvironment } from "../state/assets";
 import { usePreparedConnection } from "../state/session";
 import { previewEnvironment } from "../state/preview";
+import { resolveAssetUrl } from "../assets/assetUrls";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
@@ -162,6 +169,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), "file"],
+    src: [...(defaultSchema.protocols?.src ?? []), "file"],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
@@ -1228,6 +1236,74 @@ function areMarkdownFileLinkPropsEqual(
   );
 }
 
+interface MarkdownImageProps extends React.ComponentProps<"img"> {
+  cwd: string | undefined;
+  threadRef: ScopedThreadRef | undefined;
+  httpBaseUrl: string | null;
+  createAssetUrl: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly input: { readonly resource: AssetResource };
+  }) => Promise<AtomCommandResult<AssetCreateUrlResult, unknown>>;
+}
+
+function MarkdownImage({
+  src,
+  cwd,
+  threadRef,
+  httpBaseUrl,
+  createAssetUrl,
+  ...props
+}: MarkdownImageProps) {
+  const fileLinkMeta = useMemo(() => resolveMarkdownFileLinkMeta(src, cwd), [cwd, src]);
+  const [assetSrc, setAssetSrc] = useState<string | null>(null);
+  const shouldUseAssetUrl = Boolean(fileLinkMeta && threadRef && httpBaseUrl);
+
+  useEffect(() => {
+    if (!fileLinkMeta || !threadRef || !httpBaseUrl) {
+      setAssetSrc(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAssetSrc(null);
+    void (async () => {
+      try {
+        const result = await createAssetUrl({
+          environmentId: threadRef.environmentId,
+          input: {
+            resource: {
+              _tag: "filesystem-file",
+              path: fileLinkMeta.filePath,
+            },
+          },
+        });
+        if (cancelled) return;
+        if (result._tag === "Failure") {
+          reportMarkdownActionFailure(
+            { operation: "load-markdown-image", target: fileLinkMeta.filePath },
+            result.cause,
+          );
+          return;
+        }
+        setAssetSrc(resolveAssetUrl(httpBaseUrl, result.value.relativeUrl));
+      } catch (cause) {
+        if (!cancelled) {
+          reportMarkdownActionFailure(
+            { operation: "load-markdown-image", target: fileLinkMeta.filePath },
+            cause,
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [createAssetUrl, fileLinkMeta, httpBaseUrl, threadRef]);
+
+  return <img {...props} src={shouldUseAssetUrl ? (assetSrc ?? undefined) : src} />;
+}
+
 function ChatMarkdown({
   text,
   cwd,
@@ -1367,6 +1443,19 @@ function ChatMarkdown({
               if (!Number.isSafeInteger(markerOffset)) return;
               onTaskListChange({ markerOffset, checked: event.currentTarget.checked });
             }}
+          />
+        );
+      },
+      img({ node: _node, ...props }) {
+        return (
+          <MarkdownImage
+            {...props}
+            cwd={cwd}
+            threadRef={threadRef}
+            httpBaseUrl={
+              preparedConnection._tag === "None" ? null : preparedConnection.value.httpBaseUrl
+            }
+            createAssetUrl={createAssetUrl}
           />
         );
       },
@@ -1522,6 +1611,8 @@ function ChatMarkdown({
       },
     }),
     [
+      createAssetUrl,
+      cwd,
       diffThemeName,
       fileLinkParentSuffixByPath,
       isStreaming,
@@ -1530,6 +1621,7 @@ function ChatMarkdown({
       openInPreferredEditor,
       openExternalLinkInPreview,
       openMarkdownFileInPreview,
+      preparedConnection,
       resolvedTheme,
       skills,
       text,
