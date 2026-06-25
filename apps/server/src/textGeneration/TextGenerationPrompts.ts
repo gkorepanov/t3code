@@ -198,13 +198,20 @@ export interface ThreadTitlePromptInput {
 
 export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   const prompt = buildPromptFromMessage({
-    instruction: "You write concise thread titles for coding conversations.",
+    instruction: "You write short, memorable sidebar titles for coding-agent threads.",
     responseShape: "Return a JSON object with key: title.",
     rules: [
-      "Title should summarize the user's request, not restate it verbatim.",
-      "Keep it short and specific (3-8 words).",
-      "Avoid quotes, filler, prefixes, and trailing punctuation.",
+      "Every title must start with one or two emoji.",
+      "Emoji must be semantic and non-redundant: each emoji should add a different clue, such as domain, UI surface, data shape, failure mode, file type, or workflow.",
+      "After the emoji, make the task intent obvious: fix, investigate, wire, debug, ship, clean up, open, restore, etc.",
+      "Use the full typography toolbox when helpful: CAPS for strong action words, camel/PascalCase for code concepts, file names, symbols, slashes, arrows, and compact punctuation.",
+      "Do not force a single template. Vary shape and casing based on the request.",
+      "Keep it short, concrete, and memorable. Usually 3-7 words after the emoji.",
+      "Prefer specific nouns from the request over generic words like issue, bug, update, feature.",
+      "Never use decorative filler emoji like ✨, 🚀, 🔥, ✅ unless they carry specific meaning for this task.",
       "If images are attached, use them as primary context for visual/UI issues.",
+      "Good examples: 🏞️☰ FIX remote images in T3; 📎🌉 Remote links click through; 🔎 upbit.pyx GKV3/MMSimple hunt; 📈😶 Passive maker CFG; 🧵⚡ Streaming stalls under load; 🔐🍪 Auth cookies stop lying; 🪟🧭 Restore lost preview tabs; 🧪📉 NaN loss autopsy; 🌲⚙️ Worktree setup stops drifting.",
+      "Bad examples: 🏞️🖼️ server images in the sidebar; 🚀 Improve app; ✨ Fix bug; Remote file links in sidebar; FIX remote links; 📁 Update files.",
     ],
     message: input.message,
     attachments: input.attachments,
